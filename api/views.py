@@ -389,6 +389,8 @@ def send_billing_sms(request):
         try:
             message = (
                 f"Hello {bill.name},\n"
+                f"Prev readings: {bill.prev_user}\n"
+                f"Current readings :{bill.cur_user}\n"
                 f"Water units used: {bill.units_used}\n"
                 f"Amount due: KES {bill.bill}\n"
                 f"Thank you."
@@ -454,8 +456,8 @@ from .models import users
 
 @api_view(['POST'])
 def login_users(request):
-    username = request.data.get("username", "").strip()
-    password = request.data.get("password", "").strip()
+    username = request.data.get("username")
+    password = request.data.get("password")
     #role = request.data.get("role", "").strip()
 
     # Plain text check
