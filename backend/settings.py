@@ -65,9 +65,9 @@ MIDDLEWARE = [
 ]
 '''
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',   # ✅ move here
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -75,7 +75,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-
 
 
 ROOT_URLCONF = 'backend.urls'
@@ -161,7 +160,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-CORS_ALLOW_ALL_ORIGINS = True
+#CORS_ALLOW_ALL_ORIGINS = True
 
 # Africa's Talking (Sandbox)
 # settings.py
@@ -177,6 +176,11 @@ REST_FRAMEWORK = {
 }
 
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", ".onrender.com"]
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://mwangikenya.github.io",
+]
+CORS_ALLOW_CREDENTIALS = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
