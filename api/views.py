@@ -107,18 +107,20 @@ def bill(request):
 #==================================================================================
 #USE THE LOGS MODEL FROM THE MODELS
 #FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
-def logs(requests):
+def logs(request):
     log = Logs.objects.all()
     data = []
+
     for a in log:
         data.append({
-            'id' : a.id,
-            'reading' : a.reading,
-            'field_changed' : a.field_changed,
-            'old_val' : a.old_val,
-            'new_val' : a.new_val,
-            'changed_at' : a.changed_at
+            'id': a.id,
+            'reading': a.reading_id,
+            'field_changed': a.field_changed,
+            'old_val': a.old_val,
+            'new_val': a.new_val,
+            'changed_at': a.changed_at.isoformat() if a.changed_at else None
         })
+
     return JsonResponse(data, safe=False)
 #==================================================================================
 #UPDATE THE PAID AMOUNT IN BILLINGS
