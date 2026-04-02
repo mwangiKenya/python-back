@@ -51,7 +51,7 @@ class NewUserSerializer(serializers.ModelSerializer):
 # ============================================================
 # UPDATE READINGS SAFELY (NO CRASH VERSION)
 # ============================================================
-
+'''
 class UpdateReadingsSerializer(serializers.ModelSerializer):
     prev_user = serializers.IntegerField(required=True)
     cur_user = serializers.IntegerField(required=True)
@@ -195,7 +195,7 @@ def update(self, instance, validated_data):
     )
 
     return instance
-'''
+
 # ============================================================
 # WATER USER VIEWSET SERIALIZER
 # ============================================================
