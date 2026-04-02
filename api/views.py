@@ -113,7 +113,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 def logs(request):
     logs_qs = Logs.objects.select_related('reading').values(
         'id',
-        'reading__name',  # display reading's name instead of ID
+        'reading',  # display reading's name instead of ID
         'field_changed',
         'old_val',
         'new_val',
