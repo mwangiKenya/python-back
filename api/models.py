@@ -184,7 +184,7 @@ class Logs(models.Model):
     reading = models.ForeignKey(
         'readings',
         on_delete=models.CASCADE,
-        db_column='id'   # must match column name in MySQL
+        db_column='reading'   # must match column name in MySQL
     )
 
     field_changed = models.CharField(max_length=50)
