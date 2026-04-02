@@ -6,7 +6,7 @@ from django.db.models import F, Sum, Count, Avg
 class read_users(models.Model):
     id = models.AutoField(primary_key=True)
     fname = models.CharField(max_length=20)
-    sname = models.CharField(max_length=20)
+    #sname = models.CharField(max_length=20)
     phone = models.CharField(max_length=20)
     metre_num = models.IntegerField()
     zone = models.CharField(max_length=40)

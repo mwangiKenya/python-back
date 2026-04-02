@@ -16,7 +16,7 @@ class NewUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = read_users
         fields = [
-            'fname', 'sname', 'phone', 'metre_num', 'zone', 'rate',
+            'fname', 'phone', 'metre_num', 'zone', 'rate',
             'prev_user', 'prev_sup', 'cur_user', 'cur_sup'
         ]
 
