@@ -107,21 +107,19 @@ def bill(request):
 #==================================================================================
 #USE THE LOGS MODEL FROM THE MODELS
 #FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
-from django.views.decorators.http import require_GET
-from django.core.serializers.json import DjangoJSONEncoder
-@require_GET
-def logs(request):
-    logs = Logs.objects.select_related('reading').values(
-        'id',
-        'reading',  # display reading's name instead of ID
-        'field_changed',
-        'old_val',
-        'new_val',
-        'changed_at'
-    )
-    #.order_by('-changed_at')
-
-    return JsonResponse(list(logs), safe=False, json_dumps_params={'cls': DjangoJSONEncoder})
+def logs(requests):
+    log = Logs.objects.all()
+    data = []
+    for a in log:
+        data.append({
+            'id' : a.id,
+            'reading' : a.reading,
+            'field_changed' : a.field_changed,
+            'old_val' : a.old_val,
+            'new_val' : a.new_val,
+            'changed_at' : a.changed_at
+        })
+    return JsonResponse(data, safe=False)
 #==================================================================================
 #UPDATE THE PAID AMOUNT IN BILLINGS
 @api_view(["POST"])
