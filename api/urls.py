@@ -27,5 +27,5 @@ urlpatterns =[
     path('update_paid/', update_paid, name='update_paid'),
     path('', include(router.urls)),
     path("user-profile/<int:user_id>/", user_profile),
-    path('logs/', logs, name='logs') # Fetch logs data and display in the frontend
+    path('logs/', logs, name='logs'), # Fetch logs data and display in the frontend
 ]
