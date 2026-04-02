@@ -3,7 +3,7 @@ from django.http import JsonResponse
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import status, viewsets
-from .models import  read_users, billings, readings, users
+from .models import  read_users, billings, readings, users, Logs
 from django.views.decorators.csrf import csrf_exempt
 import json
 from django.utils import timezone
@@ -104,7 +104,14 @@ def bill(request):
         'id', 'user_id', 'name', 'phone', 'billed_on', 'units_used','rate', 'bill', 'paid', 'bal'
     )
     return JsonResponse(list(bills), safe=False)
-
+#==================================================================================
+#USE THE LOGS MODEL FROM THE MODELS
+#FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
+def logs(request):
+    log = Logs.objects.values(
+        'id', 'reading', 'field_changed', 'old_val', 'new_val', 'changed_at'
+    )
+    return JsonResponse(list(log), safe=False)
 #==================================================================================
 #UPDATE THE PAID AMOUNT IN BILLINGS
 @api_view(["POST"])

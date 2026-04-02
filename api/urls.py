@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import  water_users, bill, total_units, total_bill, total_cust, avg_units, new_user, read_data, update_readings, export_readings_excel,export_billings_excel, export_users_excel, send_billing_sms, login_user, login_users, update_paid, user_profile, total_paid
+from .views import  water_users, bill, total_units, total_bill, total_cust, avg_units, new_user, read_data, update_readings, export_readings_excel,export_billings_excel, export_users_excel, send_billing_sms, login_user, login_users, update_paid, user_profile, total_paid, logs
 from rest_framework.routers import DefaultRouter
 from .views import WaterUserViewSet
 
@@ -27,4 +27,5 @@ urlpatterns =[
     path('update_paid/', update_paid, name='update_paid'),
     path('', include(router.urls)),
     path("user-profile/<int:user_id>/", user_profile),
+    path('logs/', logs) # Fetch logs data and display in the frontend
 ]
