@@ -24,7 +24,7 @@ class read_users(models.Model):
         return cls.objects.aggregate(total = Count("id"))["total"] or 0
     
     def __str__(self):
-        return f"{self.fname} {self.sname}"
+        return f"{self.fname}"
     
     def __str__(self):
         return self.name

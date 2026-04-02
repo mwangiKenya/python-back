@@ -39,7 +39,7 @@ def user_profile(request, user_id):
         data = {
             "personal_info": {
                 "id": user.id,
-                "name": f"{user.fname} {user.sname}",  # combine first and last
+                "name": f"{user.fname}",  # combine first and last
                 "phone": user.phone,
                 "zone": user.zone,
                 "metre": user.metre_num,
@@ -79,7 +79,7 @@ def user_profile(request, user_id):
 def water_users(request):
     # Fetch only the fields you need
     users = read_users.objects.values(
-        'id', 'fname', 'sname', 'phone', 'metre_num', 'zone', 'rate', 'created_on'
+        'id', 'fname', 'phone', 'metre_num', 'zone', 'rate', 'created_on'
     )
 
     data_list = []
@@ -228,7 +228,7 @@ def new_user(request):
                 user = serializer.save()  # handles both water_users and readings
                 return Response({
                     "fname": user.fname,
-                    "sname": user.sname,
+                    #"sname": user.sname,
                     "phone": user.phone,
                     "metre_num": user.metre_num,
                     "zone": user.zone,
@@ -358,14 +358,13 @@ def export_users_excel(request):
     ws.title = "Customers"
 
     # 2️⃣ Write header row
-    ws.append(["FIRST NAME", "LAST NAME", "PHONE", "EMAIL", "REG. DATE"])
+    ws.append(["FIRST NAME", "PHONE", "EMAIL", "REG. DATE"])
 
     # 3️⃣ Write all data rows
     all_users = read_users.objects.all()
     for c in all_users:
         ws.append([
             c.fname,
-            c.sname,
             c.phone,
             c.email,
             c.created_on
