@@ -111,9 +111,9 @@ from django.views.decorators.http import require_GET
 from django.core.serializers.json import DjangoJSONEncoder
 @require_GET
 def logs(request):
-    logs = Logs.objects.values(
+    logs = Logs.objects.select_related('reading').values(
         'id',
-        'reading',
+        'reading',  # display reading's name instead of ID
         'field_changed',
         'old_val',
         'new_val',
@@ -121,7 +121,7 @@ def logs(request):
     )
     #.order_by('-changed_at')
 
-    return JsonResponse(list(logs), safe=False)
+    return JsonResponse(list(logs), safe=False, json_dumps_params={'cls': DjangoJSONEncoder})
 #==================================================================================
 #UPDATE THE PAID AMOUNT IN BILLINGS
 @api_view(["POST"])
