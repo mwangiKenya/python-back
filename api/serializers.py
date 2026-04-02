@@ -51,7 +51,7 @@ class NewUserSerializer(serializers.ModelSerializer):
 # ============================================================
 # UPDATE READINGS SAFELY (NO CRASH VERSION)
 # ============================================================
-
+'''
 class UpdateReadingsSerializer(serializers.ModelSerializer):
     prev_user = serializers.IntegerField(required=True)
     cur_user = serializers.IntegerField(required=True)
@@ -112,90 +112,77 @@ class UpdateReadingsSerializer(serializers.ModelSerializer):
         return instance
 
 '''
-
-
 from .models import Logs
 
-def update(self, instance, validated_data):
+class UpdateReadingsSerializer(serializers.ModelSerializer):
+    prev_user = serializers.IntegerField(required=True)
+    cur_user = serializers.IntegerField(required=True)
+    prev_sup = serializers.IntegerField(required=False, default=0)
+    cur_sup = serializers.IntegerField(required=False, default=0)
 
-    # ===============================
-    # 1. STORE OLD VALUES
-    # ===============================
-    old_values = {
-        "prev_user": instance.prev_user,
-        "cur_user": instance.cur_user,
-        "prev_sup": instance.prev_sup,
-        "cur_sup": instance.cur_sup,
-    }
+    class Meta:
+        model = readings
+        fields = ['id', 'prev_user', 'prev_sup', 'cur_user', 'cur_sup', 'units_used']
 
-    # ===============================
-    # 2. GET NEW VALUES
-    # ===============================
-    new_values = {
-        "prev_user": validated_data.get('prev_user', instance.prev_user),
-        "cur_user": validated_data.get('cur_user', instance.cur_user),
-        "prev_sup": validated_data.get('prev_sup', instance.prev_sup),
-        "cur_sup": validated_data.get('cur_sup', instance.cur_sup),
-    }
+    def update(self, instance, validated_data):
 
-    # ===============================
-    # 3. LOG CHANGES (ONLY IF DIFFERENT)
-    # ===============================
-    for field in old_values:
-        old = old_values[field]
-        new = new_values[field]
-
-        if old != new:
-            ReadingLogs.objects.create(
-                reading=instance,
-                field_name=field,
-                old_value=old,
-                new_value=new
-            )
-
-    # ===============================
-    # 4. UPDATE INSTANCE
-    # ===============================
-    instance.prev_user = new_values["prev_user"]
-    instance.cur_user = new_values["cur_user"]
-    instance.prev_sup = new_values["prev_sup"]
-    instance.cur_sup = new_values["cur_sup"]
-
-    # ===============================
-    # 5. CALCULATE UNITS
-    # ===============================
-    units_used = instance.cur_user - instance.prev_user
-    instance.units_used = units_used
-
-    instance.save(update_fields=[
-        'prev_user',
-        'prev_sup',
-        'cur_user',
-        'cur_sup',
-        'units_used'
-    ])
-
-    # ===============================
-    # 6. UPDATE BILLING (UNCHANGED)
-    # ===============================
-    rate = instance.rate if instance.rate else 0
-    bill_value = units_used * rate if units_used >= 1 else 300
-
-    billings.objects.update_or_create(
-        user_id=instance.user_id,
-        defaults={
-            'phone': instance.phone,
-            'units_used': units_used,
-            'name': instance.name,
-            'billed_on': instance.cur_date,
-            'rate': rate,
-            'bill': bill_value,
-            'paid': 0
+        # 1️⃣ Store old values
+        old_values = {
+            "prev_user": instance.prev_user,
+            "cur_user": instance.cur_user,
+            "prev_sup": instance.prev_sup,
+            "cur_sup": instance.cur_sup
         }
-    )
 
-    return instance
-'''
+        # 2️⃣ Get new values
+        new_values = {
+            "prev_user": validated_data.get('prev_user', instance.prev_user),
+            "cur_user": validated_data.get('cur_user', instance.cur_user),
+            "prev_sup": validated_data.get('prev_sup', instance.prev_sup),
+            "cur_sup": validated_data.get('cur_sup', instance.cur_sup)
+        }
+
+        # 3️⃣ Log changes
+        for field, old_val in old_values.items():
+            new_val = new_values[field]
+            if old_val != new_val:
+                Logs.objects.create(
+                    reading=instance,
+                    field_changed=field,
+                    old_val=old_val,
+                    new_val=new_val
+                )
+
+        # 4️⃣ Update instance
+        instance.prev_user = new_values["prev_user"]
+        instance.cur_user = new_values["cur_user"]
+        instance.prev_sup = new_values["prev_sup"]
+        instance.cur_sup = new_values["cur_sup"]
+
+        # 5️⃣ Calculate units used
+        instance.units_used = instance.cur_user - instance.prev_user
+        instance.save(update_fields=[
+            'prev_user', 'prev_sup', 'cur_user', 'cur_sup', 'units_used'
+        ])
+
+        # 6️⃣ Update or create billing
+        rate = instance.rate or 0
+        bill_value = instance.units_used * rate if instance.units_used >= 1 else 300
+        billings.objects.update_or_create(
+            user_id=instance.user_id,
+            defaults={
+                'phone': instance.phone,
+                'units_used': instance.units_used,
+                'name': instance.name,
+                'billed_on': instance.cur_date,
+                'rate': rate,
+                'bill': bill_value,
+                'paid': 0
+            }
+        )
+
+        return instance
+
 # ============================================================
 # WATER USER VIEWSET SERIALIZER
 # ============================================================
