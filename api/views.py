@@ -107,6 +107,7 @@ def bill(request):
 #==================================================================================
 #USE THE LOGS MODEL FROM THE MODELS
 #FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
+'''
 def logs(request):
     log = Logs.objects.all()
     data = []
@@ -122,6 +123,13 @@ def logs(request):
         })
 
     return JsonResponse(data, safe=False)
+'''
+def logs(request):
+    try:
+        log = Logs.objects.all().values()
+        return JsonResponse(list(log), safe=False)
+    except Exception as e:
+        return JsonResponse({'error': str(e)})
 #==================================================================================
 #UPDATE THE PAID AMOUNT IN BILLINGS
 @api_view(["POST"])
