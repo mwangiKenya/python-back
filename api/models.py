@@ -191,6 +191,7 @@ class Logs(models.Model):
 
     old_val = models.IntegerField(db_column='old_val', null=True, blank=True)
     new_val = models.IntegerField(db_column='new_val', null=True, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
 
     #changed_at = models.DateTimeField()
 
