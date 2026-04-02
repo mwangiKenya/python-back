@@ -175,3 +175,25 @@ class users(models.Model):
     class Meta:
         db_table = 'users'
         managed = False
+
+#================================================================================
+#CREATE THE MODEL FOR THE LOGS TABLE
+class Logs(models.Model):
+    id = models.AutoField(primary_key=True)
+
+    reading = models.ForeignKey(
+        'readings',
+        on_delete=models.CASCADE,
+        db_column='id'   # must match column name in MySQL
+    )
+
+    field_changed = models.CharField(max_length=50)
+
+    old_val = models.IntegerField(db_column='old_val', null=True, blank=True)
+    new_val = models.IntegerField(db_column='new_val', null=True, blank=True)
+
+    #changed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "logs"
+        managed = False

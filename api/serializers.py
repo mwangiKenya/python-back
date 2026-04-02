@@ -114,7 +114,7 @@ class UpdateReadingsSerializer(serializers.ModelSerializer):
 '''
 
 
-from .models import ReadingLogs
+from .models import Logs
 
 def update(self, instance, validated_data):
 
