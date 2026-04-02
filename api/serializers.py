@@ -111,8 +111,91 @@ class UpdateReadingsSerializer(serializers.ModelSerializer):
 
         return instance
 
+'''
 
 
+from .models import Logs
+
+def update(self, instance, validated_data):
+
+    # ===============================
+    # 1. STORE OLD VALUES
+    # ===============================
+    old_values = {
+        "prev_user": instance.prev_user,
+        "cur_user": instance.cur_user,
+        "prev_sup": instance.prev_sup,
+        "cur_sup": instance.cur_sup,
+    }
+
+    # ===============================
+    # 2. GET NEW VALUES
+    # ===============================
+    new_values = {
+        "prev_user": validated_data.get('prev_user', instance.prev_user),
+        "cur_user": validated_data.get('cur_user', instance.cur_user),
+        "prev_sup": validated_data.get('prev_sup', instance.prev_sup),
+        "cur_sup": validated_data.get('cur_sup', instance.cur_sup),
+    }
+
+    # ===============================
+    # 3. LOG CHANGES (ONLY IF DIFFERENT)
+    # ===============================
+    for field in old_values:
+        old = old_values[field]
+        new = new_values[field]
+
+        if old != new:
+            ReadingLogs.objects.create(
+                reading=instance,
+                field_name=field,
+                old_value=old,
+                new_value=new
+            )
+
+    # ===============================
+    # 4. UPDATE INSTANCE
+    # ===============================
+    instance.prev_user = new_values["prev_user"]
+    instance.cur_user = new_values["cur_user"]
+    instance.prev_sup = new_values["prev_sup"]
+    instance.cur_sup = new_values["cur_sup"]
+
+    # ===============================
+    # 5. CALCULATE UNITS
+    # ===============================
+    units_used = instance.cur_user - instance.prev_user
+    instance.units_used = units_used
+
+    instance.save(update_fields=[
+        'prev_user',
+        'prev_sup',
+        'cur_user',
+        'cur_sup',
+        'units_used'
+    ])
+
+    # ===============================
+    # 6. UPDATE BILLING (UNCHANGED)
+    # ===============================
+    rate = instance.rate if instance.rate else 0
+    bill_value = units_used * rate if units_used >= 1 else 300
+
+    billings.objects.update_or_create(
+        user_id=instance.user_id,
+        defaults={
+            'phone': instance.phone,
+            'units_used': units_used,
+            'name': instance.name,
+            'billed_on': instance.cur_date,
+            'rate': rate,
+            'bill': bill_value,
+            'paid': 0
+        }
+    )
+
+    return instance
+'''
 # ============================================================
 # WATER USER VIEWSET SERIALIZER
 # ============================================================
