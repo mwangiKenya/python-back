@@ -270,6 +270,7 @@ def new_user(request):
 
 
 # --- 2. update_readings view with serializer ---
+'''
 @csrf_exempt
 def update_readings(request):
     if request.method != "POST":
@@ -301,7 +302,7 @@ def update_readings(request):
         traceback.print_exc()
         return JsonResponse({"error": str(e)}, status=500)
     
-
+'''
 @api_view(["POST"])
 def submit_new_reading(request):
     try:
