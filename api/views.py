@@ -531,7 +531,25 @@ def login_user(request):
 
     return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-
+@csrf_exempt
+def login_user(request):
+    if request != "POST":
+        return JsonResponse({"error : ", "post only"}, status=405)
+    data = json.loads(request.body)
+    user = Admin.objects.filter(
+        username = data.get("username"),
+        password = data.get("password")
+    ).first()
+    if user:
+        return JsonResponse({
+            "status" : "success",
+            "user" : {
+                "id" : user.id,
+                "username" : user.username,
+                "password" : user.password
+            }
+        })
+    return JsonResponse({"status" : "error", "message" : "invalid credentials"}, status=401)
 
 #==========================================================================
 #ALLOW THE USERS TO LOGIN
