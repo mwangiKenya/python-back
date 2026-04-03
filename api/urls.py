@@ -28,5 +28,5 @@ urlpatterns =[
     path('', include(router.urls)),
     path("user-profile/<int:user_id>/", user_profile),
     path('logs/', logs, name='logs'), # Fetch logs data and display in the frontend
-    path('submit_new_reading', submit_new_reading, name='submit_new_reading'),
+    path('submit_new_reading/', submit_new_reading, name='submit_new_reading'),
 ]
