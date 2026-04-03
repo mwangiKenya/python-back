@@ -476,23 +476,26 @@ def login_user(request):
 #==========================================================================
 #ALLOW THE USERS TO LOGIN
 import secrets
-from .models import users
-
+from rest_framework import status
 @api_view(['POST'])
 def login_users(request):
     username = request.data.get("username")
     password = request.data.get("password")
-    #role = request.data.get("role", "").strip()
 
-    # Plain text check
     user = users.objects.filter(username=username, password=password).first()
-    
+
     if user:
         token = secrets.token_hex(32)
-        return Response({
-                "token": token,
-                "message": "Login successful"
-            })
 
-            
-    return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({
+            "token": token,
+            "role": user.role,
+            "username": user.username,
+            "id": user.id,
+            "message": "Login successful"
+        })
+
+    return Response(
+        {"error": "Invalid credentials"},
+        status=status.HTTP_401_UNAUTHORIZED
+    )
