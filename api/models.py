@@ -143,22 +143,11 @@ from django.contrib.auth.hashers import make_password, check_password
 class Admin(models.Model):
     id = models.AutoField(primary_key=True)
     username = models.CharField(max_length=50, unique=True)
-    password = models.CharField(max_length=255)  # store hashed password
+    password = models.CharField(max_length=255)  # Now treating this as a plain string
 
     class Meta:
         db_table = "admin"
-        managed = False  # if table already exists
-
-    # Helper method to check password
-    def check_password(self, raw_password):
-        return check_password(raw_password, self.password)
-
-    # Helper method to set password
-    def set_password(self, raw_password):
-        self.password = make_password(raw_password)
-        self.save()
-
-
+        managed = False
 
 from django.contrib.auth.hashers import make_password, check_password
 

@@ -518,9 +518,11 @@ def login_user(request):
     username = request.data.get("username")
     password = request.data.get("password")
 
+    # This performs a direct string-to-string comparison in the database
     admin = Admin.objects.filter(username=username, password=password).first()
 
     if admin:
+        import secrets
         token = secrets.token_hex(32)
         return Response({
             "token": token,
