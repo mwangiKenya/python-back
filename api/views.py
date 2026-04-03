@@ -512,7 +512,7 @@ def send_billing_sms(request):
 
 from .models import Admin
 import secrets
-
+'''
 @api_view(['POST'])
 def login_user(request):
     username = request.data.get("username")
@@ -530,7 +530,7 @@ def login_user(request):
         })
 
     return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
+'''
 @csrf_exempt
 def login_user(request):
     if request != "POST":
