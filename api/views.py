@@ -512,7 +512,7 @@ def send_billing_sms(request):
 
 from .models import Admin
 import secrets
-'''
+
 @api_view(['POST'])
 def login_user(request):
     username = request.data.get("username")
@@ -528,22 +528,8 @@ def login_user(request):
         })
 
     return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-'''
-@api_view(['POST'])
-def login_user(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
 
-    admin = Admin.objects.filter(username=username).first()
 
-    if admin and admin.check_password(password):
-        token = secrets.token_hex(32)
-        return Response({
-            "token": token,
-            "message": "Login successful"
-        })
-
-    return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
 #==========================================================================
 #ALLOW THE USERS TO LOGIN
