@@ -22,7 +22,7 @@ urlpatterns =[
     path('export-billings/', export_billings_excel), #export billings excel
     path('export-users/', export_users_excel), #Export users excel file
     path('send-billing-sms/', send_billing_sms, name='send_billing_sms'),
-    path('login_user/', login_user, name='login'),
+    path('login_user/', login_user, name='login_user'),
     path('users_login/', login_users, name = 'users_login'),
     path('update_paid/', update_paid, name='update_paid'),
     path('', include(router.urls)),
