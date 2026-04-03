@@ -277,6 +277,42 @@ def update_readings(request):
         return JsonResponse({"error": str(e)}, status=500)
     
 
+@api_view(["POST"])
+def submit_new_reading(request):
+    try:
+        data = request.data
+
+        user_id = data.get("user_id")
+        cur_user = data.get("cur_user")
+        cur_sup = data.get("cur_sup")
+
+        # Get last reading
+        last_reading = readings.objects.filter(user_id=user_id).order_by("-id").first()
+
+        if not last_reading:
+            return Response({"error": "No previous reading found"}, status=400)
+
+        # Create new reading
+        new_reading = readings.objects.create(
+            user_id=user_id,
+            name=last_reading.name,
+            phone=last_reading.phone,
+            prev_user=last_reading.cur_user,   # 👈 move cur → prev
+            prev_sup=last_reading.cur_sup,
+            cur_user=cur_user,
+            cur_sup=cur_sup,
+            prev_date=last_reading.cur_date,
+            cur_date=timezone.now().date(),
+            rate=last_reading.rate
+        )
+
+        return Response({
+            "message": "New reading created successfully"
+        })
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
 
 #===================================================================
 #CREATE AN EXCEL FILES TO READ DATA TO DOWNLOAD IN THE FRONEND
