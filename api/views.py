@@ -335,9 +335,9 @@ def submit_new_reading(request):
             phone=last_reading.phone,
             prev_user=last_reading.cur_user,   # move current → previous
             prev_sup=last_reading.cur_sup,
+            prev_date=last_reading.cur_date,
             cur_user=cur_user,
             cur_sup=cur_sup,
-            prev_date=last_reading.cur_date,
             cur_date=timezone.now().date(),
             rate=last_reading.rate
         )
