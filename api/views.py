@@ -270,39 +270,7 @@ def new_user(request):
 
 
 # --- 2. update_readings view with serializer ---
-'''
-@csrf_exempt
-def update_readings(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Invalid request method"}, status=405)
 
-    try:
-        data = json.loads(request.body)
-
-        with transaction.atomic():
-            for item in data:
-                reading_id = item.get("id")
-
-                # Lock the readings row
-                reading = readings.objects.select_for_update().get(id=reading_id)
-
-                # Use serializer for safe update
-                serializer = UpdateReadingsSerializer(instance=reading, data=item, partial=True)
-                if serializer.is_valid():
-                    serializer.save()  # handles both readings update and billings
-                else:
-                    return JsonResponse({"error": serializer.errors}, status=400)
-
-        return JsonResponse({"message": "Readings and billings updated successfully"})
-
-    except readings.DoesNotExist:
-        return JsonResponse({"error": f"Reading with id {reading_id} not found"}, status=404)
-
-    except Exception as e:
-        traceback.print_exc()
-        return JsonResponse({"error": str(e)}, status=500)
-    
-'''
 @api_view(["POST"])
 def submit_new_reading(request):
     try:
