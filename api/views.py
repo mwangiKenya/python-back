@@ -159,7 +159,7 @@ def update_paid(request):
 
 
 #FETCH THE READINGS DATA AND DISPLAY THEM ON THE FRONTEND
-
+'''
 def read_data(request):
     data_list = []
     all_readings = readings.objects.all()  # fetch model instances
@@ -170,6 +170,31 @@ def read_data(request):
         for key, value in obj_dict.items():
             if isinstance(value, (datetime.date, datetime.datetime)):
                 obj_dict[key] = value.isoformat()
+        data_list.append(obj_dict)
+
+    return JsonResponse(data_list, safe=False)
+'''
+def read_data(request):
+    data_list = []
+
+    # Get latest reading per user
+    latest_readings = readings.objects.raw("""
+        SELECT * FROM readings r1
+        WHERE r1.id = (
+            SELECT r2.id FROM readings r2
+            WHERE r2.user_id = r1.user_id
+            ORDER BY r2.id DESC LIMIT 1
+        )
+    """)
+
+    for obj in latest_readings:
+        obj_dict = model_to_dict(obj)
+
+        # Serialize dates
+        for key, value in obj_dict.items():
+            if isinstance(value, (datetime.date, datetime.datetime)):
+                obj_dict[key] = value.isoformat()
+
         data_list.append(obj_dict)
 
     return JsonResponse(data_list, safe=False)
@@ -286,9 +311,20 @@ def submit_new_reading(request):
         cur_user = data.get("cur_user")
         cur_sup = data.get("cur_sup")
 
+        # Validation
+        if cur_user is None or cur_sup is None:
+            return Response({"error": "Current readings required"}, status=400)
+
+        # Prevent duplicate submission for the same day
+        existing = readings.objects.filter(
+            user_id=user_id,
+            cur_date=timezone.now().date()
+        ).first()
+        if existing:
+            return Response({"error": "Reading already submitted today"}, status=400)
+
         # Get last reading
         last_reading = readings.objects.filter(user_id=user_id).order_by("-id").first()
-
         if not last_reading:
             return Response({"error": "No previous reading found"}, status=400)
 
@@ -297,7 +333,7 @@ def submit_new_reading(request):
             user_id=user_id,
             name=last_reading.name,
             phone=last_reading.phone,
-            prev_user=last_reading.cur_user,   # 👈 move cur → prev
+            prev_user=last_reading.cur_user,   # move current → previous
             prev_sup=last_reading.cur_sup,
             cur_user=cur_user,
             cur_sup=cur_sup,
@@ -306,8 +342,24 @@ def submit_new_reading(request):
             rate=last_reading.rate
         )
 
+        # ======= IMPORTANT: CREATE BILLING =======
+        units = new_reading.cur_user - new_reading.prev_user
+
+        billings.objects.create(
+            user_id=user_id,
+            name=new_reading.name,
+            phone=new_reading.phone,
+            units_used=units,
+            rate=new_reading.rate,
+            bill=units * new_reading.rate,
+            paid=0,
+            bal=units * new_reading.rate,
+            status="Unpaid"
+        )
+        # ==========================================
+
         return Response({
-            "message": "New reading created successfully"
+            "message": "New reading created successfully and billing generated"
         })
 
     except Exception as e:
