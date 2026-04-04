@@ -62,14 +62,6 @@ class billings(models.Model):
 
         #==================================
         #Save the payment status
-        '''        
-        if self.bill == self.paid:
-            self.status = 'Fully paid'
-        elif self.paid < self.bill and self.paid > 0:
-            self.status = 'Partial Paid'
-        else:
-            self.status = 'Unpaid'
-        '''
         super().save(*args, **kwargs)
 
     def save(self, *args, **kwargs):

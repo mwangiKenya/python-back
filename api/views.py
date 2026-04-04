@@ -67,13 +67,6 @@ def user_profile(request, user_id):
         # Catch any other unexpected errors
         return Response({"error": str(e)}, status=500)
 
-
-
-
-
-
-
-
 #FETCH THE WATER USERS DATA FROM THE DATABASE TO DISPLAY ON FRONTEND
 #USE THE MODEL CLASS (READ_USERS) FROM MODELS
 def water_users(request):
@@ -107,23 +100,7 @@ def bill(request):
 #==================================================================================
 #USE THE LOGS MODEL FROM THE MODELS
 #FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
-'''
-def logs(request):
-    log = Logs.objects.all()
-    data = []
 
-    for a in log:
-        data.append({
-            'id': a.id,
-            'reading': a.reading_id,
-            'field_changed': a.field_changed,
-            'old_val': a.old_val,
-            'new_val': a.new_val,
-            'changed_at': a.changed_at.isoformat() if a.changed_at else None
-        })
-
-    return JsonResponse(data, safe=False)
-'''
 def logs(request):
     try:
         log = Logs.objects.all().values()
@@ -159,21 +136,7 @@ def update_paid(request):
 
 
 #FETCH THE READINGS DATA AND DISPLAY THEM ON THE FRONTEND
-'''
-def read_data(request):
-    data_list = []
-    all_readings = readings.objects.all()  # fetch model instances
 
-    for obj in all_readings:
-        obj_dict = model_to_dict(obj)  # convert model to dict
-        # Serialize dates to ISO format
-        for key, value in obj_dict.items():
-            if isinstance(value, (datetime.date, datetime.datetime)):
-                obj_dict[key] = value.isoformat()
-        data_list.append(obj_dict)
-
-    return JsonResponse(data_list, safe=False)
-'''
 def read_data(request):
     data_list = []
 
@@ -437,120 +400,14 @@ def export_users_excel(request):
 
 
 #===================================================================
-#SENDING SMS
-
-
-from .sms import send_sms  # your sandbox-safe send_sms function
 from django.conf import settings
-
-# Your sandbox number (no spaces!)
-SANDBOX_NUMBER = "+254705973203"
-
-@api_view(['POST'])
-def send_billing_sms(request):
-    """
-    Send billing SMS to customers using the billings table.
-    Sandbox-safe: all messages go to simulator number if username is 'sandbox'.
-    """
-    send_to_all = request.data.get('send_to_all', True)
-
-    if send_to_all:
-        bills = billings.objects.all()
-    else:
-        billing_id = request.data.get('billing_id')
-        bills = billings.objects.filter(id=billing_id)
-
-    sent = []
-    failed = []
-
-    # Detect if we're in sandbox mode once
-    is_sandbox = getattr(settings, "AT_USERNAME", "").lower() == "sandbox"
-
-    for bill in bills:
-        try:
-            message = (
-                f"Hello {bill.name},\n"
-                f"Prev readings: {bill.prev_user}\n"
-                f"Current readings :{bill.cur_user}\n"
-                f"Water units used: {bill.units_used}\n"
-                f"Amount due: KES {bill.bill}\n"
-                f"Thank you."
-            )
-
-            # Sandbox override: always send to simulator
-            recipient = SANDBOX_NUMBER if is_sandbox else bill.phone
-
-            response = send_sms(recipient, message)
-
-            # Log info clearly
-            sent.append({
-                "original_phone": bill.phone,
-                "sent_to": recipient,
-                "message": message,
-                "response": response
-            })
-
-        except Exception as e:
-            failed.append({
-                "original_phone": bill.phone,
-                "error": str(e)
-            })
-
-    return Response({
-        "total": bills.count(),
-        "sent_count": len(sent),
-        "failed_count": len(failed),
-        "sent": sent,
-        "failed": failed,
-        "mode": "sandbox" if is_sandbox else "live"
-    })
-
-
 #========================================================================
 #========================================================================
 #ENABLE LOGINS
 
 from .models import Admin
 import secrets
-'''
-@api_view(['POST'])
-def login_user(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
 
-    # This performs a direct string-to-string comparison in the database
-    admin = Admin.objects.filter(username=username, password=password).first()
-
-    if admin:
-        import secrets
-        token = secrets.token_hex(32)
-        return Response({
-            "token": token,
-            "message": "Login successful"
-        })
-
-    return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
-@csrf_exempt
-def login_user(request):
-    if request != "POST":
-        return JsonResponse({"error : ", "post only"}, status=405)
-    data = json.loads(request.body)
-    user = Admin.objects.filter(
-        username = data.get("username"),
-        password = data.get("password")
-    ).first()
-    if user:
-        return JsonResponse({
-            "status" : "success",
-            "user" : {
-                "id" : user.id,
-                "username" : user.username,
-                "password" : user.password
-            }
-        })
-    return JsonResponse({"status" : "error", "message" : "invalid credentials"}, status=401)
-'''
 import secrets
 
 @csrf_exempt
