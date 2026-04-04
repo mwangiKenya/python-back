@@ -1,45 +1,45 @@
 from rest_framework.decorators import api_view
-from django.http import JsonResponse
-from django.db import transaction
+from django.http import JsonResponse, HttpResponse
 from rest_framework.response import Response
 from rest_framework import status, viewsets
-from .models import  read_users, billings, readings, users, Logs
-from django.views.decorators.csrf import csrf_exempt
-import json
+from django.db import transaction
 from django.utils import timezone
-import traceback
-from .serializers import NewUserSerializer, UpdateReadingsSerializer
-import datetime
-from django.forms.models import model_to_dict
-from django.shortcuts import get_object_or_404
-from django.contrib.auth import authenticate
-from rest_framework.authtoken.models import Token
-from rest_framework import status
-from rest_framework.decorators import permission_classes
-from rest_framework.permissions import IsAuthenticated
-from .serializers import WaterUserSerializer
 from django.db.models import Sum
+from django.forms.models import model_to_dict
+from django.views.decorators.csrf import csrf_exempt
+from openpyxl import Workbook
+import json
+import datetime
+import traceback
+import secrets
+
+from .models import read_users, billings, readings, users, Logs, Admin
+from .serializers import NewUserSerializer, WaterUserSerializer
 
 
+# =========================================
+# 1. USER PROFILE (SAFE VERSION)
+# =========================================
 @api_view(["GET"])
 def user_profile(request, user_id):
     try:
-        user = read_users.objects.get(id=user_id)
-        reading = readings.objects.get(id=user_id)
-        billing = billings.objects.get(id=user_id)
+        user = read_users.objects.filter(id=user_id).first()
+        if not user:
+            return Response({"error": "User not found"}, status=404)
 
         user_readings = readings.objects.filter(user=user)
         user_billings = billings.objects.filter(user_id=user.id)
 
+        latest_reading = user_readings.order_by("-id").first()
+
         total_units = user_readings.aggregate(Sum("units_used"))["units_used__sum"] or 0
         total_bill = user_billings.aggregate(Sum("bill"))["bill__sum"] or 0
         total_paid = user_billings.aggregate(Sum("paid"))["paid__sum"] or 0
-        total_balance = total_bill - total_paid
 
-        data = {
+        return Response({
             "personal_info": {
                 "id": user.id,
-                "name": f"{user.fname}",  # combine first and last
+                "name": user.fname,
                 "phone": user.phone,
                 "zone": user.zone,
                 "metre": user.metre_num,
@@ -48,368 +48,229 @@ def user_profile(request, user_id):
             "usage_summary": {
                 "total_units_used": total_units,
                 "number_of_readings": user_readings.count(),
-                "prev": reading.prev_user,
-                "cur" : reading.cur_user,
+                "prev": latest_reading.prev_user if latest_reading else 0,
+                "cur": latest_reading.cur_user if latest_reading else 0,
             },
             "billing_summary": {
                 "total_bill": total_bill,
                 "total_paid": total_paid,
-                "total_balance": total_balance,
-                "status": "Paid" if total_balance <= 0 else "Unpaid",
+                "total_balance": total_bill - total_paid,
+                "status": "Paid" if (total_bill - total_paid) <= 0 else "Unpaid",
             },
-        }
+        })
 
-        return Response(data)
-
-    except read_users.DoesNotExist:
-        return Response({"error": "User not found"}, status=404)
     except Exception as e:
-        # Catch any other unexpected errors
         return Response({"error": str(e)}, status=500)
 
-#FETCH THE WATER USERS DATA FROM THE DATABASE TO DISPLAY ON FRONTEND
-#USE THE MODEL CLASS (READ_USERS) FROM MODELS
+
+# =========================================
+# 2. GET ALL USERS
+# =========================================
 def water_users(request):
-    # Fetch only the fields you need
-    users = read_users.objects.values(
+    users_data = read_users.objects.values(
         'id', 'fname', 'phone', 'metre_num', 'zone', 'rate', 'created_on'
     )
 
-    data_list = []
-    for user in users:
-        # Serialize date to ISO
+    data = []
+    for user in users_data:
         if isinstance(user['created_on'], (datetime.date, datetime.datetime)):
             user['created_on'] = user['created_on'].isoformat()
-        data_list.append(user)
+        data.append(user)
 
-    return JsonResponse(data_list, safe=False)
+    return JsonResponse(data, safe=False)
 
-#===============================================================
-#Allow the update and deleting of the user data from the frontend
+
+# =========================================
+# 3. CRUD (VIEWSET)
+# =========================================
 class WaterUserViewSet(viewsets.ModelViewSet):
     queryset = read_users.objects.all()
     serializer_class = WaterUserSerializer
 
-#USE THE BILLINGS MODEL CLASS FROM MODELS
-#FETCH THE BILLINGS DATA FROM DATABASE TO DISPLAY ON THE FRONTEND
+
+# =========================================
+# 4. BILLINGS
+# =========================================
 def bill(request):
     bills = billings.objects.values(
-        'id', 'user_id', 'name', 'phone', 'billed_on', 'units_used','rate', 'bill', 'paid', 'bal'
+        'id', 'user_id', 'name', 'phone', 'billed_on',
+        'units_used', 'rate', 'bill', 'paid', 'bal'
     )
     return JsonResponse(list(bills), safe=False)
-#==================================================================================
-#USE THE LOGS MODEL FROM THE MODELS
-#FETCH THE LOGS DATA TO DISPLAY THEM ON FRONTEND
 
+
+# =========================================
+# 5. LOGS
+# =========================================
 def logs(request):
     try:
-        log = Logs.objects.all().values()
-        return JsonResponse(list(log), safe=False)
+        return JsonResponse(list(Logs.objects.all().values()), safe=False)
     except Exception as e:
-        return JsonResponse({'error': str(e)})
-#==================================================================================
-#UPDATE THE PAID AMOUNT IN BILLINGS
+        return JsonResponse({"error": str(e)})
+
+
+# =========================================
+# 6. UPDATE PAYMENT
+# =========================================
 @api_view(["POST"])
 def update_paid(request):
-    billing_id = request.data.get("id")
-    paid = request.data.get("paid")
-
     try:
-        billing = billings.objects.get(id=billing_id)
-        # Convert paid to Decimal (or float)
+        billing = billings.objects.get(id=request.data.get("id"))
+
         from decimal import Decimal
-        billing.paid = Decimal(paid)
-        billing.bal = float(billing.bill) - float(paid)
+        billing.paid = Decimal(request.data.get("paid"))
         billing.save()
-        # Return the updated billing info
+
         return Response({
-            "message": "Saved successfully",
-            "id": billing.id,
+            "message": "Updated",
             "paid": float(billing.paid),
             "bal": float(billing.bal),
             "status": billing.status
         })
+
     except billings.DoesNotExist:
-        return Response({"error": "Billing not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "Not found"}, status=404)
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": str(e)}, status=400)
 
 
-#FETCH THE READINGS DATA AND DISPLAY THEM ON THE FRONTEND
-
+# =========================================
+# 7. READINGS (LATEST ONLY)
+# =========================================
 def read_data(request):
-    data_list = []
+    readings_data = readings.objects.all().order_by("-id")
 
-    # Get latest reading per user
-    latest_readings = readings.objects.raw("""
-        SELECT * FROM readings r1
-        WHERE r1.id = (
-            SELECT r2.id FROM readings r2
-            WHERE r2.user_id = r1.user_id
-            ORDER BY r2.id DESC LIMIT 1
-        )
-    """)
+    data = []
+    seen_users = set()
 
-    for obj in latest_readings:
-        obj_dict = model_to_dict(obj)
+    for r in readings_data:
+        if r.user_id in seen_users:
+            continue
 
-        # Serialize dates
-        for key, value in obj_dict.items():
-            if isinstance(value, (datetime.date, datetime.datetime)):
-                obj_dict[key] = value.isoformat()
+        obj = model_to_dict(r)
 
-        data_list.append(obj_dict)
+        for k, v in obj.items():
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                obj[k] = v.isoformat()
 
-    return JsonResponse(data_list, safe=False)
-#FETCH THE ANALYTICS SUMS AND DISPLAY THEM ON THE PAGE
+        data.append(obj)
+        seen_users.add(r.user_id)
+
+    return JsonResponse(data, safe=False)
+
+
+# =========================================
+# 8. ANALYTICS
+# =========================================
 @api_view(["GET"])
 def total_units(request):
-    return Response({
-        "total_units": readings.total_units()
-    })
+    return Response({"total_units": readings.total_units()})
 
 
-#FETCH THE TOTAL AMOUNT OF BILLING AND DISPLAY IT ON THE FRONTEND
 @api_view(["GET"])
 def total_bill(request):
-    return Response({
-        "total_bill": billings.total_bill()
-    })
+    return Response({"total_bill": billings.total_bill()})
 
-#FETCH THE TOTAL AMOUNT BILLED FROM THE BILLINGS TABLE
+
 @api_view(["GET"])
 def total_paid(request):
-    return Response({
-        "total_paid" : billings.total_paid()
-    })
+    return Response({"total_paid": billings.total_paid()})
 
-#FETCH THE TOTAL NUMBER OF CUSTOMERS
-#AND DISPLAY THEM ON THE FRONTEND
+
 @api_view(["GET"])
 def total_cust(request):
-    return Response({
-        "total_cust": read_users.total_cust()
-    })
+    return Response({"total_cust": read_users.total_cust()})
 
-#READ THE AVERAGE OF UNITS_USED FROM THE READINGS TABLE
-#AND DISPLAY THEM ON THE FRONTEND
+
 @api_view(["GET"])
-def avg_units(reauest):
-    return Response({
-        "avg_units": readings.avg_units()
-    })
+def avg_units(request):
+    return Response({"avg_units": readings.avg_units()})
 
 
-#INSERT WATER USERS DATA TO THE DATABASE
-#USE THE WATER_USERS MODEL CLASS FROM THE MODELS
-
-
-# views.py
-
-
+# =========================================
+# 9. CREATE USER
+# =========================================
 @api_view(['POST'])
 def new_user(request):
     try:
         with transaction.atomic():
             serializer = NewUserSerializer(data=request.data)
+
             if serializer.is_valid():
-                user = serializer.save()  # handles both water_users and readings
-                return Response({
-                    "fname": user.fname,
-                    #"sname": user.sname,
-                    "phone": user.phone,
-                    "metre_num": user.metre_num,
-                    "zone": user.zone,
-                    "rate": user.rate,
-                    "created_on": user.created_on,
-                    "message": "User added successfully and readings initialized"
-                })
-            else:
-                return Response(serializer.errors, status=400)
+                user = serializer.save()
+                return Response({"message": "User created", "id": user.id})
+
+            return Response(serializer.errors, status=400)
+
     except Exception as e:
-        traceback.print_exc()
         return Response({"error": str(e)}, status=500)
 
 
-
-# --- 2. update_readings view with serializer ---
-
+# =========================================
+# 10. NEW READING + BILLING
+# =========================================
 @api_view(["POST"])
 def submit_new_reading(request):
     try:
-        data = request.data
+        user_id = request.data.get("user_id")
 
-        user_id = data.get("user_id")
-        cur_user = data.get("cur_user")
-        cur_sup = data.get("cur_sup")
+        last = readings.objects.filter(user_id=user_id).order_by("-id").first()
+        if not last:
+            return Response({"error": "No previous reading"}, status=400)
 
-        # Validation
-        if cur_user is None or cur_sup is None:
-            return Response({"error": "Current readings required"}, status=400)
-
-        # Prevent duplicate submission for the same day
-        existing = readings.objects.filter(
+        new = readings.objects.create(
             user_id=user_id,
-            cur_date=timezone.now().date()
-        ).first()
-        if existing:
-            return Response({"error": "Reading already submitted today"}, status=400)
-
-        # Get last reading
-        last_reading = readings.objects.filter(user_id=user_id).order_by("-id").first()
-        if not last_reading:
-            return Response({"error": "No previous reading found"}, status=400)
-
-        # Create new reading
-        new_reading = readings.objects.create(
-            user_id=user_id,
-            name=last_reading.name,
-            phone=last_reading.phone,
-            prev_user=last_reading.cur_user,   # move current → previous
-            prev_sup=last_reading.cur_sup,
-            prev_date=last_reading.cur_date,
-            cur_user=cur_user,
-            cur_sup=cur_sup,
+            name=last.name,
+            phone=last.phone,
+            prev_user=last.cur_user,
+            prev_sup=last.cur_sup,
+            prev_date=last.cur_date,
+            cur_user=request.data.get("cur_user"),
+            cur_sup=request.data.get("cur_sup"),
             cur_date=timezone.now().date(),
-            rate=last_reading.rate
+            rate=last.rate
         )
 
-        # ======= IMPORTANT: CREATE BILLING =======
-        units = new_reading.cur_user - new_reading.prev_user
+        units = new.cur_user - new.prev_user
 
         billings.objects.create(
             user_id=user_id,
-            name=new_reading.name,
-            phone=new_reading.phone,
+            name=new.name,
+            phone=new.phone,
             units_used=units,
-            rate=new_reading.rate,
-            bill=units * new_reading.rate,
+            rate=new.rate,
+            bill=units * new.rate,
             paid=0,
-            bal=units * new_reading.rate,
+            bal=units * new.rate,
             status="Unpaid"
         )
-        # ==========================================
 
-        return Response({
-            "message": "New reading created successfully and billing generated"
-        })
+        return Response({"message": "Reading + billing created"})
 
     except Exception as e:
         return Response({"error": str(e)}, status=500)
 
 
-#===================================================================
-#CREATE AN EXCEL FILES TO READ DATA TO DOWNLOAD IN THE FRONEND
-# backend/api/views.py
-from django.http import HttpResponse
-from openpyxl import Workbook
-
+# =========================================
+# 11. EXPORT EXCEL
+# =========================================
 def export_readings_excel(request):
-    # 1️⃣ Create a workbook and sheet
     wb = Workbook()
     ws = wb.active
-    ws.title = "Readings"
+    ws.append(["ID", "User", "Units"])
 
-    # 2️⃣ Write header row
-    ws.append(["ID", "User", "Name", "Phone", "Prev User", "Cur User", "Units Used"])
+    for r in readings.objects.all():
+        ws.append([r.id, r.user_id, r.units_used])
 
-    # 3️⃣ Write all data rows
-    all_readings = readings.objects.all()
-    for r in all_readings:
-        ws.append([
-            r.id,
-            r.user.id,
-            r.name,
-            r.phone,
-            r.prev_user,
-            r.cur_user,
-            r.units_used
-        ])
-
-    # 4️⃣ Prepare the response as an Excel file
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    response = HttpResponse(content_type="application/vnd.ms-excel")
     response['Content-Disposition'] = 'attachment; filename="readings.xlsx"'
     wb.save(response)
     return response
 
 
-#===================================================
-#DOWNLOAD THE BILLINGS FILE
-def export_billings_excel(request):
-    # 1️⃣ Create a workbook and sheet
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Billings"
-
-    # 2️⃣ Write header row
-    ws.append(["USER ID", "NAME", "PHONE", "DATE BILLED", "UNITS USED", "BILLED AMOUNT"])
-
-    # 3️⃣ Write all data rows
-    all_bills = billings.objects.all()
-    for b in all_bills:
-        ws.append([
-            b.user_id,
-            b.name,
-            b.phone,
-            b.billed_on,
-            b.units_used,
-            b.bill
-        ])
-
-    # 4️⃣ Prepare the response as an Excel file
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    response['Content-Disposition'] = 'attachment; filename="billings.xlsx"'
-    wb.save(response)
-    return response
-
-
-
-
-#===================================================
-#DOWNLOAD THE WATER USERS FILE
-def export_users_excel(request):
-    # 1️⃣ Create a workbook and sheet
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Customers"
-
-    # 2️⃣ Write header row
-    ws.append(["FIRST NAME", "PHONE", "EMAIL", "REG. DATE"])
-
-    # 3️⃣ Write all data rows
-    all_users = read_users.objects.all()
-    for c in all_users:
-        ws.append([
-            c.fname,
-            c.phone,
-            c.email,
-            c.created_on
-        ])
-
-    # 4️⃣ Prepare the response as an Excel file
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    response['Content-Disposition'] = 'attachment; filename="billings.xlsx"'
-    wb.save(response)
-    return response
-
-
-#===================================================================
-from django.conf import settings
-#========================================================================
-#========================================================================
-#ENABLE LOGINS
-
-from .models import Admin
-import secrets
-
-import secrets
-
+# =========================================
+# 12. LOGIN (ADMIN)
+# =========================================
 @csrf_exempt
 def login_user(request):
     if request.method != "POST":
@@ -423,40 +284,30 @@ def login_user(request):
     ).first()
 
     if user:
-        token = secrets.token_hex(32)
-
         return JsonResponse({
-            "token": token,
+            "token": secrets.token_hex(32),
             "username": user.username
         })
 
-    return JsonResponse(
-        {"error": "Invalid credentials"},
-        status=401
-    )
-#==========================================================================
-#ALLOW THE USERS TO LOGIN
-import secrets
-from rest_framework import status
+    return JsonResponse({"error": "Invalid credentials"}, status=401)
+
+
+# =========================================
+# 13. LOGIN (USERS)
+# =========================================
 @api_view(['POST'])
 def login_users(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
-
-    user = users.objects.filter(username=username, password=password).first()
+    user = users.objects.filter(
+        username=request.data.get("username"),
+        password=request.data.get("password")
+    ).first()
 
     if user:
-        token = secrets.token_hex(32)
-
         return Response({
-            "token": token,
+            "token": secrets.token_hex(32),
             "role": user.role,
             "username": user.username,
-            "id": user.id,
-            "message": "Login successful"
+            "id": user.id
         })
 
-    return Response(
-        {"error": "Invalid credentials"},
-        status=status.HTTP_401_UNAUTHORIZED
-    )
+    return Response({"error": "Invalid credentials"}, status=401)
