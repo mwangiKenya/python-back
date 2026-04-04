@@ -530,7 +530,7 @@ def login_user(request):
         })
 
     return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-'''
+
 @csrf_exempt
 def login_user(request):
     if request != "POST":
@@ -550,7 +550,33 @@ def login_user(request):
             }
         })
     return JsonResponse({"status" : "error", "message" : "invalid credentials"}, status=401)
+'''
+import secrets
 
+@csrf_exempt
+def login_user(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    data = json.loads(request.body)
+
+    user = Admin.objects.filter(
+        username=data.get("username"),
+        password=data.get("password")
+    ).first()
+
+    if user:
+        token = secrets.token_hex(32)
+
+        return JsonResponse({
+            "token": token,
+            "username": user.username
+        })
+
+    return JsonResponse(
+        {"error": "Invalid credentials"},
+        status=401
+    )
 #==========================================================================
 #ALLOW THE USERS TO LOGIN
 import secrets
