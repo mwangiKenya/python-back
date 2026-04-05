@@ -50,7 +50,7 @@ def logs(request):
     for l in log:
         data.append({
             'id' : l.id,
-            'reading' : l.reading,
+            'reading': l.reading.id if l.reading else None,
             'field_changed' : l.field_changed,
             'old_val' : l.old_val,
             'new_val' : l.new_val,
