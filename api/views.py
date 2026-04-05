@@ -66,6 +66,7 @@ def user_profile(request, user_id):
 # =========================================
 # 2. GET ALL USERS
 # =========================================
+'''
 def water_users(request):
     users_data = read_users.objects.values(
         'id', 'fname', 'phone', 'metre_num', 'zone', 'rate', 'created_on'
@@ -78,7 +79,21 @@ def water_users(request):
         data.append(user)
 
     return JsonResponse(data, safe=False)
-
+'''
+def water_users(request):
+    users = read_users.objects.all()
+    data = []
+    for u in users:
+        data.append({
+            'id' : u.id,
+            'fname' : u.fname,
+            'phone' : u.phone,
+            'metre_num' : u.metre_num,
+            'zone' : u.zone,
+            'rate' : u.rate,
+            'created_on' : u.created_on
+        })
+    return JsonResponse(data, safe=False)
 
 # =========================================
 # 3. CRUD (VIEWSET)
