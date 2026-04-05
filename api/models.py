@@ -14,8 +14,8 @@ class read_users(models.Model):
         managed = False
 
 class readings(models.Model):
-    id = models.AutoField(primary_key=True)  # ✅ FIX
-    user = models.ForeignKey(read_users, on_delete=models.CASCADE, db_column='user_id')  # ✅ FIX
+    id = models.AutoField(primary_key=True) 
+    user = models.ForeignKey(read_users, on_delete=models.CASCADE, db_column='user_id')
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=50)
     prev_user = models.IntegerField()
@@ -39,4 +39,34 @@ class Admin(models.Model):
 
     class Meta:
         db_table = 'admin'
+        managed = False
+
+
+class Billings(models.Model):
+    id = models.AutoField(primary_key=True)
+    user_id = models.IntegerField()
+    name = models.CharField(max_length=100)
+    phone = models.CharField(max_length=100)
+    billed_on = models.DateField()
+    units_used = models.IntegerField()
+    rate = models.IntegerField()
+    bill = models.FloatField()
+    paid = models.FloatField()
+    bal = models.FloatField()
+    status = models.CharField(max_length=100)
+
+    class Meta:
+        db_table = 'billings'
+        managed = False
+
+class Logs(models.Model):
+    id = models.AutoField(primary_key=True)  # ✅ FIX
+    reading = models.ForeignKey('readings', on_delete=models.CASCADE, db_column='reading')  # ✅ FK
+    field_changed = models.CharField(max_length=100)
+    old_val = models.IntegerField()
+    new_val = models.IntegerField()
+    changed_at = models.DateField()
+
+    class Meta:
+        db_table = 'logs'
         managed = False

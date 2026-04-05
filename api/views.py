@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from .models import read_users, readings, Admin
+from .models import read_users, readings, Admin, Billings, Logs
 from django.views.decorators.csrf import csrf_exempt
 import json
 import secrets
@@ -106,6 +106,115 @@ def new_user(request):
             )
 
         return JsonResponse({"message": "User registered successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
+from datetime import date
+import json
+
+@csrf_exempt
+def submit_new_reading(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+
+        # Support BOTH single object & array (Save + Save All)
+        updates = data if isinstance(data, list) else [data]
+
+        with transaction.atomic():
+
+            for item in updates:
+                user_id = item.get("user_id")
+                new_cur_user = int(item.get("cur_user", 0))
+                new_cur_sup = int(item.get("cur_sup", 0))
+
+                # 🔍 Get existing reading row
+                reading = readings.objects.get(user_id=user_id)
+
+                prev_user = reading.prev_user
+                prev_sup = reading.prev_sup
+
+                # ------------------- LOGGING -------------------
+                today = date.today()
+
+                if new_cur_user != 0:
+                    Logs.objects.create(
+                        reading=reading,
+                        field_changed="cur_user",
+                        old_val=prev_user,
+                        new_val=new_cur_user,
+                        changed_at=today
+                    )
+
+                if new_cur_sup != 0:
+                    Logs.objects.create(
+                        reading=reading,
+                        field_changed="cur_sup",
+                        old_val=prev_sup,
+                        new_val=new_cur_sup,
+                        changed_at=today
+                    )
+
+                # ------------------- CALCULATIONS -------------------
+                units_used = new_cur_user - prev_user
+
+                # ------------------- UPDATE READINGS -------------------
+                reading.prev_user = new_cur_user if new_cur_user != 0 else prev_user
+                reading.prev_sup = new_cur_sup if new_cur_sup != 0 else prev_sup
+                reading.cur_user = 0
+                reading.cur_sup = 0
+                reading.units_used = units_used
+                reading.cur_date = today
+                reading.save()
+
+                # ------------------- BILLING -------------------
+                bill = units_used * reading.rate
+                if units_used == 0:
+                    bill = 300
+
+                billing, created = Billings.objects.get_or_create(
+                    user_id=user_id,
+                    defaults={
+                        "name": reading.name,
+                        "phone": reading.phone,
+                        "billed_on": today,
+                        "units_used": units_used,
+                        "rate": reading.rate,
+                        "bill": bill,
+                        "paid": 0,
+                        "bal": bill,
+                        "status": "Unpaid"
+                    }
+                )
+
+                if not created:
+                    # Update existing billing
+                    billing.units_used = units_used
+                    billing.rate = reading.rate
+                    billing.bill = bill
+                    billing.billed_on = today
+
+                    # Recalculate balance
+                    billing.bal = bill - billing.paid
+
+                    # Status logic
+                    if billing.paid == 0:
+                        billing.status = "Unpaid"
+                    elif billing.paid < bill:
+                        billing.status = "Partially Paid"
+                    else:
+                        billing.status = "Paid"
+
+                    billing.save()
+
+        return JsonResponse({"message": "Saved successfully"})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
