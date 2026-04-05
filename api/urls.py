@@ -10,7 +10,7 @@ urlpatterns =[
     path('bill/', bill, name='bill'), # fetch billings data
     path('logs/', logs, name='logs'), #fetch logs data
     path('update_paid/', update_paid, name='update_paid'),
-    path('total_bill', total_bill, name='total_bill'),
+    path('total_bill/', total_bill, name='total_bill'),
     path('register_user/', register_user, name='register_user'),
     path('list_employees/', list_employees, name='list_employees'),
 ]

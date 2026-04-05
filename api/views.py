@@ -8,6 +8,8 @@ from django.db import transaction
 from datetime import date
 import json
 
+#================================================================================
+#READ THE WATER USERS DATA & DISPLAY ON THE FRONTEND
 def water_users(request):
     users = read_users.objects.all()
     data = []
@@ -58,6 +60,9 @@ def logs(request):
             'changed_at': l.changed_at.strftime('%Y-%m-%d') if l.changed_at else None
         })
     return JsonResponse(data, safe=False)
+
+#============================================================
+#FETCH THE READINGS DATA & DISPLAY THEM ON THE FRONTEND
 def read_data(request):
     read = readings.objects.all()
     data = []
@@ -75,6 +80,8 @@ def read_data(request):
         })
     return JsonResponse(data, safe=False)
 
+#=====================================================================
+#THIS CODE ENABLES THE ADMIN TO LOGIN TO HIS DASHBOARD
 @csrf_exempt
 def login_user(request):
     if request.method != "POST":
@@ -96,7 +103,8 @@ def login_user(request):
     except:
         return JsonResponse({"error": "Something went wrong"}, status=500)
     
-
+#==================================================================
+#REGISTER A NEW USER, & INSERT INTO READINGS TABLE
 @csrf_exempt
 def new_user(request):
     if request.method != "POST":
@@ -153,7 +161,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from datetime import date
 import json
-
+#================================================================
+#UPDATE READINGS, INSERT BILLINGS AND LOGS DATA
 @csrf_exempt
 def submit_new_reading(request):
     if request.method != "POST":
@@ -259,7 +268,8 @@ def submit_new_reading(request):
 
 
 from decimal import Decimal
-
+#========================================================================
+#UPDATE THE AMOUNT PAID, SET BALANCE & PAYMENT STATUS ON THE BILLINGS TABLE
 @csrf_exempt
 def update_paid(request):
     if request.method != "POST":
@@ -295,7 +305,9 @@ def update_paid(request):
         return JsonResponse({"error": str(e)}, status=500)
     
 
-
+#=======================================================================
+#THE ANALYTICS:
+#CALCULATE THE TOTAL BILLS FROM THE BILLINGS TABLE
 from django.db.models import Sum  # ✅ Add at the top if not already
 
 def total_bill(request):
@@ -306,12 +318,12 @@ def total_bill(request):
         return JsonResponse({"error": str(e)}, status=500)
     
 
-
+#========================================================================
+#THIS CODE REGISTERS A NEW USER/EMPLOYEE ON THE USERS TABLE
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .models import Users
-
 @api_view(['POST'])
 def register_user(request):
     username = request.data.get('username')
@@ -327,7 +339,8 @@ def register_user(request):
     user = Users.objects.create(username=username, password=password, role=role)
     return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
 
-
+#===========================================================
+#THIS CODE FETCHES THE EMPLOYEES DATA FROM THE USERS TABLE & DISPLAY ON THE ADMIN DASHBOARD
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Users
