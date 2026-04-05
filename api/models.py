@@ -30,3 +30,12 @@ class readings(models.Model):
     class Meta:
         db_table = 'readings'
         managed = False
+
+class Admin(models.Model):
+    id = models.IntegerField()
+    username = models.CharField(max_length=100)
+    password = models.CharField(max_length=100)
+
+    class Meta:
+        db_table = 'admin'
+        managed = False

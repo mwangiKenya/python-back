@@ -1,5 +1,8 @@
 from django.http import JsonResponse
-from .models import read_users, readings
+from .models import read_users, readings, Admin
+from django.views.decorators.csrf import csrf_exempt
+import json
+import secrets
 
 def water_users(request):
     users = read_users.objects.all()
@@ -30,3 +33,24 @@ def read_data(request):
             'rate' : r.rate
         })
     return JsonResponse(data, safe=False)
+
+@csrf_exempt
+def login_user(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        username = data.get("username")
+        password = data.get("password")
+
+        admin = Admin.objects.filter(username=username, password=password).first()
+
+        if admin:
+            token = secrets.token_hex(32)
+            return JsonResponse({"token": token})
+        else:
+            return JsonResponse({"error": "Invalid login credentials"}, status=401)
+
+    except:
+        return JsonResponse({"error": "Something went wrong"}, status=500)
