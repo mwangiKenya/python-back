@@ -12,7 +12,7 @@ def water_users(request):
             'metre_num' : u.metre_num,
             'zone' : u.zone,
             'rate' : u.rate,
-            'created_on' : u.created_on
+            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None
         })
     return JsonResponse(data, safe=False)
 
