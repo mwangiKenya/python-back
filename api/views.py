@@ -15,7 +15,7 @@ def water_users(request):
             'created_on' : u.created_on
         })
     return JsonResponse(data, safe=False)
-
+'''
 def read_data(request):
     read = readings.objects.all()
     data = []
@@ -30,3 +30,4 @@ def read_data(request):
             'rate' : r.rate
         })
     return JsonResponse(data, safe=False)
+'''

@@ -12,7 +12,7 @@ class read_users(models.Model):
     class Meta:
         db_table = 'waterusers'
         managed = False
-
+'''
 class readings(models.Model):
     id = models.IntegerField()
     user_id = models.IntegerField()
@@ -30,3 +30,4 @@ class readings(models.Model):
     class Meta:
         db_table = 'readings'
         managed = False
+'''
