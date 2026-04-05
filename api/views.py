@@ -308,7 +308,7 @@ def update_paid(request):
 #=======================================================================
 #THE ANALYTICS:
 #CALCULATE THE TOTAL BILLS FROM THE BILLINGS TABLE
-from django.db.models import Sum, Avg  # ✅ Add at the top if not already
+from django.db.models import Sum, Avg, Count  # ✅ Add at the top if not already
 
 def total_bill(request):
     try:
@@ -333,7 +333,21 @@ def avg_units(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
+#SELECT TOTAL UNITS USED FROM THE BILLINGS TABLE
+def total_units(request):
+    try:
+        total = Billings.objects.aggregate(total_units=Sum('units_used'))['total_units'] or 0
+        return JsonResponse({"total_units": float(total)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
     
+#SELECT THE TOTAL CUSTOMERS
+def total_cust(request):
+    try:
+        total = read_users.objects.aggregate(total_cust=Count('id'))['total_cust'] or 0
+        return JsonResponse({"total_cust": (total)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 #========================================================================
 #THIS CODE REGISTERS A NEW USER/EMPLOYEE ON THE USERS TABLE
