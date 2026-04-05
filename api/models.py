@@ -1,7 +1,7 @@
 from django.db import models
 
 class read_users(models.Model):
-    id = models.IntegerField()
+    id = models.AutoField(primary_key=True)  # ✅ FIX
     fname = models.CharField(max_length=100)
     phone = models.CharField(max_length=100)
     metre_num = models.IntegerField()
@@ -14,8 +14,8 @@ class read_users(models.Model):
         managed = False
 
 class readings(models.Model):
-    id = models.IntegerField()
-    user_id = models.IntegerField()
+    id = models.AutoField(primary_key=True)  # ✅ FIX
+    user = models.ForeignKey(read_users, on_delete=models.CASCADE, db_column='user_id')  # ✅ FIX
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=50)
     prev_user = models.IntegerField()
@@ -30,6 +30,7 @@ class readings(models.Model):
     class Meta:
         db_table = 'readings'
         managed = False
+
 
 class Admin(models.Model):
     id = models.IntegerField()
