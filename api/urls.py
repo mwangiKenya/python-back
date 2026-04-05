@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import  water_users, read_data, login_user, new_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user
+from .views import  water_users, read_data, login_user, new_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees
 
 urlpatterns =[
     path('water_users/', water_users, name='water_users'), #fetch water users data
@@ -12,4 +12,5 @@ urlpatterns =[
     path('update_paid/', update_paid, name='update_paid'),
     path('total_bill', total_bill, name='total_bill'),
     path('register_user/', register_user, name='register_user'),
+    path('list_employees/', list_employees, name='list_employees'),
 ]

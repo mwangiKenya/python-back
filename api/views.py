@@ -326,3 +326,13 @@ def register_user(request):
 
     user = Users.objects.create(username=username, password=password, role=role)
     return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Users
+
+@api_view(['GET'])
+def list_employees(request):
+    employees = Users.objects.all().values('id', 'username', 'role')
+    return Response(list(employees))
