@@ -54,7 +54,7 @@ def logs(request):
             'field_changed' : l.field_changed,
             'old_val' : l.old_val,
             'new_val' : l.new_val,
-            'changed_at' : l.changed_at
+            'changed_at': l.changed_at.strftime('%Y-%m-%d') if l.changed_at else None
         })
     return JsonResponse(data, safe=False)
 def read_data(request):
@@ -252,5 +252,41 @@ def submit_new_reading(request):
 
         return JsonResponse({"message": "Saved successfully"})
 
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+
+@csrf_exempt
+def update_paid(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        billing_id = data.get("id")
+        new_paid = float(data.get("paid", 0))
+
+        billing = Billings.objects.get(id=billing_id)
+        billing.paid = new_paid
+        billing.bal = billing.bill - new_paid
+
+        if new_paid == 0:
+            billing.status = "Unpaid"
+        elif new_paid < billing.bill:
+            billing.status = "Partially Paid"
+        else:
+            billing.status = "Paid"
+
+        billing.save()
+
+        return JsonResponse({
+            "id": billing.id,
+            "paid": billing.paid,
+            "bal": billing.bal,
+            "status": billing.status
+        })
+    except Billings.DoesNotExist:
+        return JsonResponse({"error": "Billing not found"}, status=404)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
