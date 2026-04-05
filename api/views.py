@@ -23,6 +23,40 @@ def water_users(request):
         })
     return JsonResponse(data, safe=False)
 
+#===========================================================================================
+#READ THE BILLINGS DATA AND DISPLAY ON THE FRONTEND
+def bill(request):
+    bills = Billings.objects.all()
+    data = []
+    for b in bills:
+        data.append({
+            'user_id' : b.user_id,
+            'name' : b.name,
+            'phone' : b.phone,
+            'units_used' : b.units_used,
+            'rate' : b.rate,
+            'bill' : b.bill,
+            'paid' : b.paid,
+            'bal' : b.bal,
+            'status' : b.status
+        })
+    return JsonResponse(data, safe=False)
+
+#====================================================================================
+#READ LOGS DATA AND DISPLAY ON THE FRONTEND
+def logs(request):
+    log = Logs.objects.all()
+    data = []
+    for l in log:
+        data.append({
+            'id' : l.id,
+            'reading' : l.reading,
+            'field_changed' : l.field_changed,
+            'old_val' : l.old_val,
+            'new_val' : l.new_val,
+            'changed_at' : l.changed_at
+        })
+    return JsonResponse(data, safe=False)
 def read_data(request):
     read = readings.objects.all()
     data = []
