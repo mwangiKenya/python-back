@@ -70,3 +70,13 @@ class Logs(models.Model):
     class Meta:
         db_table = 'logs'
         managed = False
+
+class Users(models.Model):
+    id = models.AutoField(primary_key=True)
+    username = models.CharField(max_length=100)
+    password = models.CharField(max_length=100)
+    role = models.CharField(max_length=100)
+
+    class Meta:
+        db_table = 'users'
+        managed = False
