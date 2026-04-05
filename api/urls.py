@@ -15,6 +15,6 @@ urlpatterns =[
     path('list_employees/', list_employees, name='list_employees'),
     path('total_paid', total_paid, name='total_paid'),
     path('avg_units', avg_units, name='avg_units'),
-    path('total_cust', total_cust, name='total_cust'),
-    path('total_units', total_units, name='total_units'),
+    path('total_cust/', total_cust, name='total_cust'),
+    path('total_units/', total_units, name='total_units'),
 ]
