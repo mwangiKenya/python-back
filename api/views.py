@@ -258,6 +258,8 @@ def submit_new_reading(request):
 
 
 
+from decimal import Decimal
+
 @csrf_exempt
 def update_paid(request):
     if request.method != "POST":
@@ -266,11 +268,11 @@ def update_paid(request):
     try:
         data = json.loads(request.body)
         billing_id = data.get("id")
-        new_paid = float(data.get("paid", 0))
+        new_paid = Decimal(str(data.get("paid", 0)))  # ✅ FIX
 
         billing = Billings.objects.get(id=billing_id)
         billing.paid = new_paid
-        billing.bal = billing.bill - new_paid
+        billing.bal = billing.bill - new_paid  # ✅ Now safe
 
         if new_paid == 0:
             billing.status = "Unpaid"
@@ -283,8 +285,8 @@ def update_paid(request):
 
         return JsonResponse({
             "id": billing.id,
-            "paid": billing.paid,
-            "bal": billing.bal,
+            "paid": float(billing.paid),  # optional: convert for JSON
+            "bal": float(billing.bal),
             "status": billing.status
         })
     except Billings.DoesNotExist:
