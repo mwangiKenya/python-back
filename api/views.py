@@ -30,6 +30,7 @@ def bill(request):
     data = []
     for b in bills:
         data.append({
+            'id' : b.id,
             'user_id' : b.user_id,
             'name' : b.name,
             'phone' : b.phone,
