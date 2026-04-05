@@ -28,6 +28,8 @@ def read_data(request):
     data = []
     for r in read:
         data.append({
+            'id': r.id,              # reading id
+            'user_id': r.user_id,
             'name' : r.name,
             'phone' : r.phone,
             'prev_user' : r.prev_user,
