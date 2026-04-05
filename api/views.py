@@ -293,3 +293,14 @@ def update_paid(request):
         return JsonResponse({"error": "Billing not found"}, status=404)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+
+from django.db.models import Sum  # ✅ Add at the top if not already
+
+def total_bill(request):
+    try:
+        total = Billings.objects.aggregate(total_bill=Sum('bill'))['total_bill'] or 0
+        return JsonResponse({"total_bill": float(total)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
