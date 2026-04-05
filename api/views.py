@@ -308,7 +308,7 @@ def update_paid(request):
 #=======================================================================
 #THE ANALYTICS:
 #CALCULATE THE TOTAL BILLS FROM THE BILLINGS TABLE
-from django.db.models import Sum  # ✅ Add at the top if not already
+from django.db.models import Sum, Avg  # ✅ Add at the top if not already
 
 def total_bill(request):
     try:
@@ -316,6 +316,23 @@ def total_bill(request):
         return JsonResponse({"total_bill": float(total)})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+#SELECT THE TOTAL PAID FROM THE BILLINGS TABLE
+def total_paid(request):
+    try:
+        total = Billings.objects.aggregate(total_paid=Sum('paid'))['total_paid'] or 0
+        return JsonResponse({"total_paid": float(total)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
+#SELECT THE AVG UNITS USED FROM THE BILLINGS TABLE
+def avg_units(request):
+    try:
+        average = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
+        return JsonResponse({"avg_units": float(average)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
     
 
 #========================================================================
