@@ -380,3 +380,33 @@ from .models import Users
 def list_employees(request):
     employees = Users.objects.all().values('id', 'username', 'role')
     return Response(list(employees))
+
+#=================================================================================
+#DELETE & UPDATE USER
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import read_users
+from .serializers import ReadUsersSerializer
+
+
+# UPDATE + DELETE single user
+@api_view(['PUT', 'DELETE'])
+def water_user_detail(request, id):
+    try:
+        user = read_users.objects.get(id=id)
+    except read_users.DoesNotExist:
+        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # ✅ UPDATE USER
+    if request.method == 'PUT':
+        serializer = ReadUsersSerializer(user, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # ✅ DELETE USER
+    if request.method == 'DELETE':
+        user.delete()
+        return Response({"message": "User deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
