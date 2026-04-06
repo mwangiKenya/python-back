@@ -190,11 +190,3 @@ class WaterUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = read_users
         fields = '__all__'
-
-from rest_framework import serializers
-from .models import read_users
-
-class ReadUsersSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = read_users
-        fields = '__all__'
