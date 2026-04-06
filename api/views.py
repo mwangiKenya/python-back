@@ -380,3 +380,46 @@ from .models import Users
 def list_employees(request):
     employees = Users.objects.all().values('id', 'username', 'role')
     return Response(list(employees))
+
+
+from django.http import HttpResponse
+import pandas as pd
+from .models import Readings, Billings, read_users  # your models
+
+# ---------------------------
+# Export Readings Excel
+# ---------------------------
+def export_readings(request):
+    # Get all readings
+    reading = readings.objects.all().values()  # .values() returns dictionaries
+    df = pd.DataFrame(reading)
+
+    # Create Excel in memory
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=readings.xlsx'
+    df.to_excel(response, index=False)
+    return response
+
+# ---------------------------
+# Export Billings Excel
+# ---------------------------
+def export_billings(request):
+    billings = Billings.objects.all().values()
+    df = pd.DataFrame(billings)
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=billings.xlsx'
+    df.to_excel(response, index=False)
+    return response
+
+# ---------------------------
+# Export Customers Excel
+# ---------------------------
+def export_users(request):
+    users = read_users.objects.all().values()
+    df = pd.DataFrame(users)
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=customers.xlsx'
+    df.to_excel(response, index=False)
+    return response
