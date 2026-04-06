@@ -1,12 +1,16 @@
-from django.http import JsonResponse
-from .models import read_users, readings, Admin, Billings, Logs
+from django.http import JsonResponse, HttpResponse
+from .models import read_users, readings, Admin, Billings, Logs, Users
 from django.views.decorators.csrf import csrf_exempt
 import json
 import secrets
-from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from datetime import date
-import json
+from decimal import Decimal
+import pandas as pd
+from django.db.models import Sum, Avg, Count  # ✅ Add at the top if not already
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
 
 #================================================================================
 #READ THE WATER USERS DATA & DISPLAY ON THE FRONTEND
@@ -155,12 +159,6 @@ def new_user(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.db import transaction
-from datetime import date
-import json
 #================================================================
 #UPDATE READINGS, INSERT BILLINGS AND LOGS DATA
 @csrf_exempt
@@ -267,7 +265,7 @@ def submit_new_reading(request):
 
 
 
-from decimal import Decimal
+
 #========================================================================
 #UPDATE THE AMOUNT PAID, SET BALANCE & PAYMENT STATUS ON THE BILLINGS TABLE
 @csrf_exempt
@@ -308,7 +306,6 @@ def update_paid(request):
 #=======================================================================
 #THE ANALYTICS:
 #CALCULATE THE TOTAL BILLS FROM THE BILLINGS TABLE
-from django.db.models import Sum, Avg, Count  # ✅ Add at the top if not already
 
 def total_bill(request):
     try:
@@ -351,10 +348,7 @@ def total_cust(request):
 
 #========================================================================
 #THIS CODE REGISTERS A NEW USER/EMPLOYEE ON THE USERS TABLE
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-from .models import Users
+
 @api_view(['POST'])
 def register_user(request):
     username = request.data.get('username')
@@ -372,9 +366,6 @@ def register_user(request):
 
 #===========================================================
 #THIS CODE FETCHES THE EMPLOYEES DATA FROM THE USERS TABLE & DISPLAY ON THE ADMIN DASHBOARD
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import Users
 
 @api_view(['GET'])
 def list_employees(request):
@@ -382,9 +373,6 @@ def list_employees(request):
     return Response(list(employees))
 
 
-from django.http import HttpResponse
-import pandas as pd
-from .models import Readings, Billings, read_users  # your models
 
 # ---------------------------
 # Export Readings Excel
@@ -423,3 +411,36 @@ def export_users(request):
     response['Content-Disposition'] = 'attachment; filename=customers.xlsx'
     df.to_excel(response, index=False)
     return response
+
+# Disable CSRF for simplicity (only if using API)
+@csrf_exempt
+def users_login(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST requests allowed"}, status=405)
+
+    try:
+        import json
+        data = json.loads(request.body)
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return JsonResponse({"error": "Username and password required"}, status=400)
+
+        # Fetch the user with matching username and password
+        user = Users.objects.filter(username=username, password=password).first()
+
+        if not user:
+            return JsonResponse({"error": "Invalid username or password"}, status=401)
+
+        # Generate a simple token
+        token = secrets.token_hex(16)
+
+        return JsonResponse({
+            "token": token,
+            "username": user.username,
+            "role": user.role
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
