@@ -6,7 +6,7 @@ import secrets
 from django.db import transaction
 from datetime import date
 from decimal import Decimal
-import pandas as pd
+#import pandas as pd
 from django.db.models import Sum, Avg, Count  # ✅ Add at the top if not already
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -373,7 +373,7 @@ def list_employees(request):
     return Response(list(employees))
 
 
-
+'''
 # ---------------------------
 # Export Readings Excel
 # ---------------------------
@@ -411,7 +411,7 @@ def export_users(request):
     response['Content-Disposition'] = 'attachment; filename=customers.xlsx'
     df.to_excel(response, index=False)
     return response
-
+'''
 # Disable CSRF for simplicity (only if using API)
 @csrf_exempt
 def users_login(request):
