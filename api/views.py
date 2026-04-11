@@ -394,7 +394,7 @@ def register_user(request):
         "CREATE",
         "users",
         user.id,
-        f"{request.data.get('role')} created employee {user.username}"
+        f"Admin created employee {user.username}"
     )
 
     return Response({"message": "User registered successfully"})
