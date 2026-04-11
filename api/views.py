@@ -209,7 +209,7 @@ def new_user(request):
                 action="CREATE",
                 table="waterusers",
                 record_id=user.id,
-                description=f"{role} created new customer {fname}"
+                description=f"{user_name} created new customer {fname}"
             )
 
         return JsonResponse({"message": "User registered successfully"})
