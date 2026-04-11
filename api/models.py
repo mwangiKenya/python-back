@@ -58,7 +58,7 @@ class Billings(models.Model):
     class Meta:
         db_table = 'billings'
         managed = False
-
+'''
 class Logs(models.Model):
     id = models.AutoField(primary_key=True)  # ✅ FIX
     reading = models.ForeignKey('readings', on_delete=models.CASCADE, db_column='reading')  # ✅ FK
@@ -70,6 +70,24 @@ class Logs(models.Model):
     class Meta:
         db_table = 'logs'
         managed = False
+'''
+class Logs(models.Model):
+    id = models.AutoField(primary_key=True)
+    username = models.CharField(max_length=100)   # who performed action
+    role = models.CharField(max_length=100)   # role of user
+    action = models.CharField(max_length=50)  # CREATE, UPDATE, DELETE, LOGIN
+    table_name = models.CharField(max_length=100)  # readings, billings, users
+    record_id = models.IntegerField()  # affected row id
+    field_changed = models.CharField(max_length=100, null=True, blank=True)
+    old_val = models.TextField(null=True, blank=True)
+    new_val = models.TextField(null=True, blank=True)
+    description = models.TextField()  # human readable message
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'logs'
+        managed = False
+
 
 class Users(models.Model):
     id = models.AutoField(primary_key=True)

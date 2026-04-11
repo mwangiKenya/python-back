@@ -1,3 +1,455 @@
+
+from django.http import JsonResponse, HttpResponse
+from .models import read_users, readings, Admin, Billings, Logs, Users
+from django.views.decorators.csrf import csrf_exempt
+import json
+import secrets
+from django.db import transaction
+from datetime import date
+from decimal import Decimal
+from django.db.models import Sum, Avg, Count
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+
+# ============================================================
+# HELPER FUNCTION → CREATE LOG (Avoid repeating code everywhere)
+# ============================================================
+def create_log(username, role, action, table, record_id, description,
+               field_changed=None, old_val=None, new_val=None):
+
+    Logs.objects.create(
+        username=username,
+        role=role,
+        action=action,
+        table_name=table,
+        record_id=record_id,
+        field_changed=field_changed,
+        old_val=str(old_val) if old_val is not None else None,
+        new_val=str(new_val) if new_val is not None else None,
+        description=description
+    )
+
+# ============================================================
+# FETCH ALL WATER USERS
+# ============================================================
+def water_users(request):
+    users = read_users.objects.all()
+    data = []
+
+    for u in users:
+        data.append({
+            'id': u.id,
+            'fname': u.fname,
+            'phone': u.phone,
+            'metre_num': u.metre_num,
+            'zone': u.zone,
+            'rate': u.rate,
+            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None
+        })
+
+    return JsonResponse(data, safe=False)
+
+# ============================================================
+# FETCH ALL BILLINGS
+# ============================================================
+def bill(request):
+    bills = Billings.objects.all()
+    data = []
+
+    for b in bills:
+        data.append({
+            'id': b.id,
+            'user_id': b.user_id,
+            'name': b.name,
+            'phone': b.phone,
+            'units_used': b.units_used,
+            'rate': b.rate,
+            'bill': b.bill,
+            'paid': b.paid,
+            'bal': b.bal,
+            'status': b.status
+        })
+
+    return JsonResponse(data, safe=False)
+
+# ============================================================
+# FETCH ALL LOGS (FOR ADMIN DASHBOARD)
+# ============================================================
+def logs(request):
+    log = Logs.objects.all().order_by('-changed_at')
+    data = []
+
+    for l in log:
+        data.append({
+            'id': l.id,
+            'username': l.username,
+            'role': l.role,
+            'action': l.action,
+            'table_name': l.table_name,
+            'record_id': l.record_id,
+            'field_changed': l.field_changed,
+            'old_val': l.old_val,
+            'new_val': l.new_val,
+            'description': l.description,
+            'changed_at': l.changed_at.strftime('%Y-%m-%d %H:%M:%S') if l.changed_at else None
+        })
+
+    return JsonResponse(data, safe=False)
+
+# ============================================================
+# FETCH READINGS
+# ============================================================
+def read_data(request):
+    read = readings.objects.all()
+    data = []
+
+    for r in read:
+        data.append({
+            'id': r.id,
+            'user_id': r.user_id,
+            'name': r.name,
+            'phone': r.phone,
+            'prev_user': r.prev_user,
+            'prev_sup': r.prev_sup,
+            'cur_user': r.cur_user,
+            'cur_sup': r.cur_sup,
+            'rate': r.rate
+        })
+
+    return JsonResponse(data, safe=False)
+
+# ============================================================
+# ADMIN LOGIN
+# ============================================================
+@csrf_exempt
+def login_user(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        username = data.get("username")
+        password = data.get("password")
+
+        admin = Admin.objects.filter(username=username, password=password).first()
+
+        if admin:
+            token = secrets.token_hex(32)
+
+            # 🔥 LOG LOGIN
+            create_log(
+                username=username,
+                role="admin",
+                action="LOGIN",
+                table="admin",
+                record_id=admin.id,
+                description="Admin logged into system"
+            )
+
+            return JsonResponse({"token": token})
+
+        return JsonResponse({"error": "Invalid login credentials"}, status=401)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+# ============================================================
+# CREATE NEW CUSTOMER
+# ============================================================
+@csrf_exempt
+def new_user(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+
+        fname = data.get("fname")
+        phone = data.get("phone")
+        metre_num = data.get("metre_num")
+        zone = data.get("zone")
+        rate = data.get("rate")
+
+        user_name = data.get("user")
+        role = data.get("role")
+
+        if not all([fname, phone, metre_num, zone, rate]):
+            return JsonResponse({"error": "Missing fields"}, status=400)
+
+        with transaction.atomic():
+            user = read_users.objects.create(
+                fname=fname,
+                phone=phone,
+                metre_num=metre_num,
+                zone=zone,
+                rate=rate
+            )
+
+            today = date.today()
+
+            readings.objects.create(
+                user=user,
+                name=fname,
+                phone=phone,
+                prev_user=0,
+                prev_sup=0,
+                prev_date=today,
+                cur_user=0,
+                cur_sup=0,
+                cur_date=today,
+                units_used=0,
+                rate=rate
+            )
+
+            # 🔥 LOG USER CREATION
+            create_log(
+                username=user_name,
+                role=role,
+                action="CREATE",
+                table="waterusers",
+                record_id=user.id,
+                description=f"{role} created new customer {fname}"
+            )
+
+        return JsonResponse({"message": "User registered successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+# ============================================================
+# SUBMIT NEW READINGS + BILLING + LOGGING
+# ============================================================
+@csrf_exempt
+def submit_new_reading(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        updates = data if isinstance(data, list) else [data]
+
+        with transaction.atomic():
+
+            for item in updates:
+                user_id = item.get("user_id")
+                new_cur_user = int(item.get("cur_user", 0))
+                new_cur_sup = int(item.get("cur_sup", 0))
+
+                user_name = item.get("user")
+                role = item.get("role")
+
+                reading = readings.objects.get(user_id=user_id)
+
+                prev_user = reading.prev_user
+                prev_sup = reading.prev_sup
+
+                # 🔥 LOG CHANGES
+                if new_cur_user != 0:
+                    create_log(
+                        user_name, role, "UPDATE", "readings", reading.id,
+                        f"{role} updated meter from {prev_user} to {new_cur_user}",
+                        "cur_user", prev_user, new_cur_user
+                    )
+
+                if new_cur_sup != 0:
+                    create_log(
+                        user_name, role, "UPDATE", "readings", reading.id,
+                        f"{role} updated supply from {prev_sup} to {new_cur_sup}",
+                        "cur_sup", prev_sup, new_cur_sup
+                    )
+
+                # CALCULATIONS
+                units_used = new_cur_user - prev_user
+
+                reading.prev_user = new_cur_user or prev_user
+                reading.prev_sup = new_cur_sup or prev_sup
+                reading.cur_user = 0
+                reading.cur_sup = 0
+                reading.units_used = units_used
+                reading.cur_date = date.today()
+                reading.save()
+
+                # BILLING
+                bill = units_used * reading.rate
+                if units_used == 0:
+                    bill = 300
+
+                billing, created = Billings.objects.get_or_create(
+                    user_id=user_id,
+                    defaults={
+                        "name": reading.name,
+                        "phone": reading.phone,
+                        "billed_on": date.today(),
+                        "units_used": units_used,
+                        "rate": reading.rate,
+                        "bill": bill,
+                        "paid": 0,
+                        "bal": bill,
+                        "status": "Unpaid"
+                    }
+                )
+
+                if not created:
+                    billing.units_used = units_used
+                    billing.bill = bill
+                    billing.bal = bill - billing.paid
+                    billing.save()
+
+                    # 🔥 LOG BILL UPDATE
+                    create_log(
+                        user_name, role, "UPDATE", "billings", billing.id,
+                        f"{role} updated billing for {reading.name}"
+                    )
+
+        return JsonResponse({"message": "Saved successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+# ============================================================
+# UPDATE PAYMENT
+# ============================================================
+@csrf_exempt
+def update_paid(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+
+        billing = Billings.objects.get(id=data.get("id"))
+        old_paid = billing.paid
+
+        new_paid = Decimal(str(data.get("paid", 0)))
+
+        billing.paid = new_paid
+        billing.bal = billing.bill - new_paid
+
+        if new_paid == 0:
+            billing.status = "Unpaid"
+        elif new_paid < billing.bill:
+            billing.status = "Partially Paid"
+        else:
+            billing.status = "Paid"
+
+        billing.save()
+
+        # 🔥 LOG PAYMENT
+        create_log(
+            data.get("user"),
+            data.get("role"),
+            "UPDATE",
+            "billings",
+            billing.id,
+            f"{data.get('role')} updated payment from {old_paid} to {new_paid}",
+            "paid",
+            old_paid,
+            new_paid
+        )
+
+        return JsonResponse({"message": "Payment updated"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+# ============================================================
+# ANALYTICS (UNCHANGED)
+# ============================================================
+def total_bill(request):
+    total = Billings.objects.aggregate(total_bill=Sum('bill'))['total_bill'] or 0
+    return JsonResponse({"total_bill": float(total)})
+
+def total_paid(request):
+    total = Billings.objects.aggregate(total_paid=Sum('paid'))['total_paid'] or 0
+    return JsonResponse({"total_paid": float(total)})
+
+def avg_units(request):
+    avg = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
+    return JsonResponse({"avg_units": float(avg)})
+
+def total_units(request):
+    total = Billings.objects.aggregate(total_units=Sum('units_used'))['total_units'] or 0
+    return JsonResponse({"total_units": float(total)})
+
+def total_cust(request):
+    total = read_users.objects.aggregate(total_cust=Count('id'))['total_cust'] or 0
+    return JsonResponse({"total_cust": total})
+
+# ============================================================
+# EMPLOYEE MANAGEMENT
+# ============================================================
+@api_view(['POST'])
+def register_user(request):
+    user = Users.objects.create(
+        username=request.data.get('username'),
+        password=request.data.get('password'),
+        role=request.data.get('role')
+    )
+
+    # 🔥 LOG USER CREATION
+    create_log(
+        request.data.get("user"),
+        request.data.get("role"),
+        "CREATE",
+        "users",
+        user.id,
+        f"{request.data.get('role')} created employee {user.username}"
+    )
+
+    return Response({"message": "User registered successfully"})
+
+@api_view(['GET'])
+def list_employees(request):
+    return Response(list(Users.objects.all().values('id', 'username', 'role')))
+
+# ============================================================
+# USERS LOGIN (ROLE-BASED)
+# ============================================================
+@csrf_exempt
+def users_login(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST requests allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        user = Users.objects.filter(
+            username=data.get("username"),
+            password=data.get("password")
+        ).first()
+
+        if not user:
+            return JsonResponse({"error": "Invalid credentials"}, status=401)
+
+        token = secrets.token_hex(16)
+
+        # 🔥 LOG LOGIN
+        create_log(
+            user.username,
+            user.role,
+            "LOGIN",
+            "users",
+            user.id,
+            f"{user.role} logged into system"
+        )
+
+        return JsonResponse({
+            "token": token,
+            "username": user.username,
+            "role": user.role
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+
+
+
+
+
+
+'''
 from django.http import JsonResponse, HttpResponse
 from .models import read_users, readings, Admin, Billings, Logs, Users
 from django.views.decorators.csrf import csrf_exempt
@@ -374,43 +826,7 @@ def list_employees(request):
 
 
 '''
-# ---------------------------
-# Export Readings Excel
-# ---------------------------
-def export_readings(request):
-    # Get all readings
-    reading = readings.objects.all().values()  # .values() returns dictionaries
-    df = pd.DataFrame(reading)
 
-    # Create Excel in memory
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=readings.xlsx'
-    df.to_excel(response, index=False)
-    return response
-
-# ---------------------------
-# Export Billings Excel
-# ---------------------------
-def export_billings(request):
-    billings = Billings.objects.all().values()
-    df = pd.DataFrame(billings)
-
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=billings.xlsx'
-    df.to_excel(response, index=False)
-    return response
-
-# ---------------------------
-# Export Customers Excel
-# ---------------------------
-def export_users(request):
-    users = read_users.objects.all().values()
-    df = pd.DataFrame(users)
-
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=customers.xlsx'
-    df.to_excel(response, index=False)
-    return response
 '''
 # Disable CSRF for simplicity (only if using API)
 @csrf_exempt
@@ -444,3 +860,4 @@ def users_login(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+'''
