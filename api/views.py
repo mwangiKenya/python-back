@@ -430,7 +430,7 @@ def users_login(request):
             "LOGIN",
             "users",
             user.id,
-            f"{user.role} logged into system"
+            f"{user.username} logged into system"
         )
 
         return JsonResponse({
