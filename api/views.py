@@ -389,7 +389,7 @@ def register_user(request):
 
     # 🔥 LOG USER CREATION
     create_log(
-        request.data.get("username"),
+        "Admin",
         request.data.get("role"),
         "CREATE",
         "users",
