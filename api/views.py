@@ -171,7 +171,7 @@ def new_user(request):
         zone = data.get("zone")
         rate = data.get("rate")
 
-        user_name = data.get("user")
+        user_name = data.get("username")
         role = data.get("role")
 
         if not all([fname, phone, metre_num, zone, rate]):
@@ -236,7 +236,7 @@ def submit_new_reading(request):
                 new_cur_user = int(item.get("cur_user", 0))
                 new_cur_sup = int(item.get("cur_sup", 0))
 
-                user_name = item.get("user")
+                user_name = item.get("username")
                 role = item.get("role")
 
                 reading = readings.objects.get(user_id=user_id)
@@ -337,7 +337,7 @@ def update_paid(request):
 
         # 🔥 LOG PAYMENT
         create_log(
-            data.get("user"),
+            data.get("username"),
             data.get("role"),
             "UPDATE",
             "billings",
@@ -389,7 +389,7 @@ def register_user(request):
 
     # 🔥 LOG USER CREATION
     create_log(
-        request.data.get("user"),
+        request.data.get("username"),
         request.data.get("role"),
         "CREATE",
         "users",
