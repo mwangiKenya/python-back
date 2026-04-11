@@ -118,13 +118,26 @@ DATABASES = {
 
 
 import dj_database_url
-
+'''
 DATABASES = {
     'default': dj_database_url.parse(
         "mysql://root:BXUgAzwQELWOELiKmInInChtelsIyTIm@interchange.proxy.rlwy.net:36580/railway"
     )
 }
-
+'''
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'postgres',
+        'USER': 'postgres',
+        'PASSWORD': 'Maseno@001.',
+        'HOST': 'db.bhutxbmglzmnmdvtfzeo.supabase.co',
+        'PORT': '5432',
+        'OPTIONS': {
+            'sslmode': 'require',
+        },
+    }
+}
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
