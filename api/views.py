@@ -139,7 +139,7 @@ def login_user(request):
 
             # 🔥 LOG LOGIN
             create_log(
-                username=username,
+                username="admin",
                 role="admin",
                 action="LOGIN",
                 table="admin",
@@ -441,423 +441,41 @@ def users_login(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
-
-
-
-
-
-
-
-'''
-from django.http import JsonResponse, HttpResponse
-from .models import read_users, readings, Admin, Billings, Logs, Users
-from django.views.decorators.csrf import csrf_exempt
-import json
-import secrets
-from django.db import transaction
-from datetime import date
-from decimal import Decimal
-#import pandas as pd
-from django.db.models import Sum, Avg, Count  # ✅ Add at the top if not already
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-
-#================================================================================
-#READ THE WATER USERS DATA & DISPLAY ON THE FRONTEND
-def water_users(request):
-    users = read_users.objects.all()
-    data = []
-    for u in users:
-        data.append({
-            'id' : u.id,
-            'fname' : u.fname,
-            'phone' : u.phone,
-            'metre_num' : u.metre_num,
-            'zone' : u.zone,
-            'rate' : u.rate,
-            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None
-        })
-    return JsonResponse(data, safe=False)
-
-#===========================================================================================
-#READ THE BILLINGS DATA AND DISPLAY ON THE FRONTEND
-def bill(request):
-    bills = Billings.objects.all()
-    data = []
-    for b in bills:
-        data.append({
-            'id' : b.id,
-            'user_id' : b.user_id,
-            'name' : b.name,
-            'phone' : b.phone,
-            'units_used' : b.units_used,
-            'rate' : b.rate,
-            'bill' : b.bill,
-            'paid' : b.paid,
-            'bal' : b.bal,
-            'status' : b.status
-        })
-    return JsonResponse(data, safe=False)
-
-#====================================================================================
-#READ LOGS DATA AND DISPLAY ON THE FRONTEND
-def logs(request):
-    log = Logs.objects.all()
-    data = []
-    for l in log:
-        data.append({
-            'id' : l.id,
-            'reading': l.reading.id if l.reading else None,
-            'field_changed' : l.field_changed,
-            'old_val' : l.old_val,
-            'new_val' : l.new_val,
-            'changed_at': l.changed_at.strftime('%Y-%m-%d') if l.changed_at else None
-        })
-    return JsonResponse(data, safe=False)
-
-#============================================================
-#FETCH THE READINGS DATA & DISPLAY THEM ON THE FRONTEND
-def read_data(request):
-    read = readings.objects.all()
-    data = []
-    for r in read:
-        data.append({
-            'id': r.id,              # reading id
-            'user_id': r.user_id,
-            'name' : r.name,
-            'phone' : r.phone,
-            'prev_user' : r.prev_user,
-            'prev_sup' : r.prev_sup,
-            'cur_user' : r.cur_user,
-            'cur_sup' : r.cur_sup,
-            'rate' : r.rate
-        })
-    return JsonResponse(data, safe=False)
-
-#=====================================================================
-#THIS CODE ENABLES THE ADMIN TO LOGIN TO HIS DASHBOARD
-@csrf_exempt
-def login_user(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Invalid request"}, status=400)
-
-    try:
-        data = json.loads(request.body)
-        username = data.get("username")
-        password = data.get("password")
-
-        admin = Admin.objects.filter(username=username, password=password).first()
-
-        if admin:
-            token = secrets.token_hex(32)
-            return JsonResponse({"token": token})
-        else:
-            return JsonResponse({"error": "Invalid login credentials"}, status=401)
-
-    except:
-        return JsonResponse({"error": "Something went wrong"}, status=500)
     
-#==================================================================
-#REGISTER A NEW USER, & INSERT INTO READINGS TABLE
+
 @csrf_exempt
-def new_user(request):
-    if request.method != "POST":
+def delete_user(request, user_id):
+    if request.method != "DELETE":
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
-        data = json.loads(request.body)
+        data = json.loads(request.body) if request.body else {}
 
-        fname = data.get("fname")
-        phone = data.get("phone")
-        metre_num = data.get("metre_num")
-        zone = data.get("zone")
-        rate = data.get("rate")
-
-        if not all([fname, phone, metre_num, zone, rate]):
-            return JsonResponse({"error": "Missing fields"}, status=400)
+        user_name = data.get("username", "Unknown")
+        role = data.get("role", "Unknown")
 
         with transaction.atomic():
-            # ✅ Insert into waterusers (ID auto-generated by DB)
-            user = read_users.objects.create(
-                fname=fname,
-                phone=phone,
-                metre_num=metre_num,
-                zone=zone,
-                rate=rate
-                # ❌ DO NOT include created_on (DB handles it)
+            try:
+                user = read_users.objects.get(id=user_id)
+            except read_users.DoesNotExist:
+                return JsonResponse({"error": "User not found"}, status=404)
+
+            fname = user.fname
+
+            # 🔥 THIS deletes BOTH user + readings automatically
+            user.delete()
+
+            # 🔥 LOG DELETE ACTION
+            create_log(
+                username=user_name,
+                role=role,
+                action="DELETE",
+                table="waterusers",
+                record_id=user_id,
+                description=f"{user_name} deleted customer {fname}"
             )
 
-            today = date.today()
-
-            # ✅ Insert into readings using FK (user.id automatically used)
-            readings.objects.create(
-                user=user,  # ✅ FK linkage
-                name=fname,
-                phone=phone,
-                prev_user=0,
-                prev_sup=0,
-                prev_date=today,
-                cur_user=0,
-                cur_sup=0,
-                cur_date=today,
-                units_used=0,
-                rate=rate
-            )
-
-        return JsonResponse({"message": "User registered successfully"})
+        return JsonResponse({"message": "User and related readings deleted successfully"})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-    
-#================================================================
-#UPDATE READINGS, INSERT BILLINGS AND LOGS DATA
-@csrf_exempt
-def submit_new_reading(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Invalid request"}, status=400)
-
-    try:
-        data = json.loads(request.body)
-
-        # Support BOTH single object & array (Save + Save All)
-        updates = data if isinstance(data, list) else [data]
-
-        with transaction.atomic():
-
-            for item in updates:
-                user_id = item.get("user_id")
-                new_cur_user = int(item.get("cur_user", 0))
-                new_cur_sup = int(item.get("cur_sup", 0))
-
-                # 🔍 Get existing reading row
-                reading = readings.objects.get(user_id=user_id)
-
-                prev_user = reading.prev_user
-                prev_sup = reading.prev_sup
-
-                # ------------------- LOGGING -------------------
-                today = date.today()
-
-                if new_cur_user != 0:
-                    Logs.objects.create(
-                        reading=reading,
-                        field_changed="cur_user",
-                        old_val=prev_user,
-                        new_val=new_cur_user,
-                        changed_at=today
-                    )
-
-                if new_cur_sup != 0:
-                    Logs.objects.create(
-                        reading=reading,
-                        field_changed="cur_sup",
-                        old_val=prev_sup,
-                        new_val=new_cur_sup,
-                        changed_at=today
-                    )
-
-                # ------------------- CALCULATIONS -------------------
-                units_used = new_cur_user - prev_user
-
-                # ------------------- UPDATE READINGS -------------------
-                reading.prev_user = new_cur_user if new_cur_user != 0 else prev_user
-                reading.prev_sup = new_cur_sup if new_cur_sup != 0 else prev_sup
-                reading.cur_user = 0
-                reading.cur_sup = 0
-                reading.units_used = units_used
-                reading.cur_date = today
-                reading.save()
-
-                # ------------------- BILLING -------------------
-                bill = units_used * reading.rate
-                if units_used == 0:
-                    bill = 300
-
-                billing, created = Billings.objects.get_or_create(
-                    user_id=user_id,
-                    defaults={
-                        "name": reading.name,
-                        "phone": reading.phone,
-                        "billed_on": today,
-                        "units_used": units_used,
-                        "rate": reading.rate,
-                        "bill": bill,
-                        "paid": 0,
-                        "bal": bill,
-                        "status": "Unpaid"
-                    }
-                )
-
-                if not created:
-                    # Update existing billing
-                    billing.units_used = units_used
-                    billing.rate = reading.rate
-                    billing.bill = bill
-                    billing.billed_on = today
-
-                    # Recalculate balance
-                    billing.bal = bill - billing.paid
-
-                    # Status logic
-                    if billing.paid == 0:
-                        billing.status = "Unpaid"
-                    elif billing.paid < bill:
-                        billing.status = "Partially Paid"
-                    else:
-                        billing.status = "Paid"
-
-                    billing.save()
-
-        return JsonResponse({"message": "Saved successfully"})
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-
-
-#========================================================================
-#UPDATE THE AMOUNT PAID, SET BALANCE & PAYMENT STATUS ON THE BILLINGS TABLE
-@csrf_exempt
-def update_paid(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Invalid request"}, status=400)
-
-    try:
-        data = json.loads(request.body)
-        billing_id = data.get("id")
-        new_paid = Decimal(str(data.get("paid", 0)))  # ✅ FIX
-
-        billing = Billings.objects.get(id=billing_id)
-        billing.paid = new_paid
-        billing.bal = billing.bill - new_paid  # ✅ Now safe
-
-        if new_paid == 0:
-            billing.status = "Unpaid"
-        elif new_paid < billing.bill:
-            billing.status = "Partially Paid"
-        else:
-            billing.status = "Paid"
-
-        billing.save()
-
-        return JsonResponse({
-            "id": billing.id,
-            "paid": float(billing.paid),  # optional: convert for JSON
-            "bal": float(billing.bal),
-            "status": billing.status
-        })
-    except Billings.DoesNotExist:
-        return JsonResponse({"error": "Billing not found"}, status=404)
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-    
-
-#=======================================================================
-#THE ANALYTICS:
-#CALCULATE THE TOTAL BILLS FROM THE BILLINGS TABLE
-
-def total_bill(request):
-    try:
-        total = Billings.objects.aggregate(total_bill=Sum('bill'))['total_bill'] or 0
-        return JsonResponse({"total_bill": float(total)})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-    
-#SELECT THE TOTAL PAID FROM THE BILLINGS TABLE
-def total_paid(request):
-    try:
-        total = Billings.objects.aggregate(total_paid=Sum('paid'))['total_paid'] or 0
-        return JsonResponse({"total_paid": float(total)})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-    
-#SELECT THE AVG UNITS USED FROM THE BILLINGS TABLE
-def avg_units(request):
-    try:
-        average = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
-        return JsonResponse({"avg_units": float(average)})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-    
-#SELECT TOTAL UNITS USED FROM THE BILLINGS TABLE
-def total_units(request):
-    try:
-        total = Billings.objects.aggregate(total_units=Sum('units_used'))['total_units'] or 0
-        return JsonResponse({"total_units": float(total)})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-    
-#SELECT THE TOTAL CUSTOMERS
-def total_cust(request):
-    try:
-        total = read_users.objects.aggregate(total_cust=Count('id'))['total_cust'] or 0
-        return JsonResponse({"total_cust": (total)})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-#========================================================================
-#THIS CODE REGISTERS A NEW USER/EMPLOYEE ON THE USERS TABLE
-
-@api_view(['POST'])
-def register_user(request):
-    username = request.data.get('username')
-    password = request.data.get('password')  # plaintext
-    role = request.data.get('role')
-
-    if not username or not password or not role:
-        return Response({"error": "All fields are required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    if Users.objects.filter(username=username).exists():
-        return Response({"error": "Username already exists"}, status=status.HTTP_400_BAD_REQUEST)
-
-    user = Users.objects.create(username=username, password=password, role=role)
-    return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
-
-#===========================================================
-#THIS CODE FETCHES THE EMPLOYEES DATA FROM THE USERS TABLE & DISPLAY ON THE ADMIN DASHBOARD
-
-@api_view(['GET'])
-def list_employees(request):
-    employees = Users.objects.all().values('id', 'username', 'role')
-    return Response(list(employees))
-
-
-'''
-
-'''
-# Disable CSRF for simplicity (only if using API)
-@csrf_exempt
-def users_login(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Only POST requests allowed"}, status=405)
-
-    try:
-        import json
-        data = json.loads(request.body)
-        username = data.get("username")
-        password = data.get("password")
-
-        if not username or not password:
-            return JsonResponse({"error": "Username and password required"}, status=400)
-
-        # Fetch the user with matching username and password
-        user = Users.objects.filter(username=username, password=password).first()
-
-        if not user:
-            return JsonResponse({"error": "Invalid username or password"}, status=401)
-
-        # Generate a simple token
-        token = secrets.token_hex(16)
-
-        return JsonResponse({
-            "token": token,
-            "username": user.username,
-            "role": user.role
-        })
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-'''
