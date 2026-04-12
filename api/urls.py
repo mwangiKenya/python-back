@@ -21,7 +21,7 @@ urlpatterns =[
     #path('export-billings/', export_billings, name='export_billings'),
     #path('export-users/', export_users, name='export_users'),
     path('users_login/', users_login, name='users_login'),
-    path('api/delete_user/<int:user_id>/', delete_user, name='delete_user'),
-    path('api/delete_employee/<int:emp_id>/', delete_employee),
-    path('api/update_employee/<int:emp_id>/', update_employee),
+    path('delete_user/<int:user_id>/', delete_user, name='delete_user'),
+    path('delete_employee/<int:emp_id>/', delete_employee),
+    path('update_employee/<int:emp_id>/', update_employee),
 ]
