@@ -482,27 +482,27 @@ def delete_user(request, user_id):
     
 
 @csrf_exempt
-def delete_employee(request, id):
+def delete_employee(request, emp_id):
     if request.method != "DELETE":
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
-        emp = Employees.objects.get(id=id)
+        emp = Users.objects.get(id=emp_id)
         emp.delete()
         return JsonResponse({"message": "Employee deleted"})
-    except Employees.DoesNotExist:
+    except Users.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
     
 
 @csrf_exempt
-def update_employee(request, id):
+def update_employee(request, emp_id):
     if request.method != "PUT":
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
         data = json.loads(request.body)
 
-        emp = Employees.objects.get(id=id)
+        emp = Users.objects.get(id=emp_id)
 
         emp.username = data.get("username", emp.username)
         emp.role = data.get("role", emp.role)
@@ -510,7 +510,7 @@ def update_employee(request, id):
         emp.save()
 
         return JsonResponse({"message": "Employee updated"})
-    except Employees.DoesNotExist:
+    except Users.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
