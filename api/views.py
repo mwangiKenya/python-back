@@ -113,8 +113,10 @@ def read_data(request):
             'metre_num' : r.metre_num,
             'prev_user': r.prev_user,
             'prev_sup': r.prev_sup,
+            'prev_date': r.prev_date,
             'cur_user': r.cur_user,
             'cur_sup': r.cur_sup,
+            'cur_date' : r.cur_date,
             'rate': r.rate
         })
 
