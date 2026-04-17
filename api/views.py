@@ -252,14 +252,14 @@ def submit_new_reading(request):
                 if new_cur_user != 0:
                     create_log(
                         user_name, role, "UPDATE", "readings", reading.id,
-                        f"{role} updated meter from {prev_user} to {new_cur_user}",
+                        f"{role} updated user reading from {prev_user} to {new_cur_user}",
                         "cur_user", prev_user, new_cur_user
                     )
 
                 if new_cur_sup != 0:
                     create_log(
                         user_name, role, "UPDATE", "readings", reading.id,
-                        f"{role} updated supply from {prev_sup} to {new_cur_sup}",
+                        f"{role} updated sup reading from {prev_sup} to {new_cur_sup}",
                         "cur_sup", prev_sup, new_cur_sup
                     )
 
