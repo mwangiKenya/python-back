@@ -466,10 +466,12 @@ def delete_user(request, user_id):
 
             fname = user.fname
 
-            # 🔥 THIS deletes BOTH user + readings automatically
+            # THIS deletes BOTH user + readings automatically
+            #  Delete billings explicitly
+            Billings.objects.filter(user_id=user_id).delete()
             user.delete()
 
-            # 🔥 LOG DELETE ACTION
+            # LOG DELETE ACTION
             create_log(
                 username=user_name,
                 role=role,
