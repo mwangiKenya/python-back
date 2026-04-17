@@ -110,6 +110,7 @@ def read_data(request):
             'user_id': r.user_id,
             'name': r.name,
             'phone': r.phone,
+            'metre_num' : r.metre_num,
             'prev_user': r.prev_user,
             'prev_sup': r.prev_sup,
             'cur_user': r.cur_user,
