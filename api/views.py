@@ -446,7 +446,7 @@ def users_login(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
+'''
 @csrf_exempt
 def delete_user(request, user_id):
     if request.method != "DELETE":
@@ -485,7 +485,57 @@ def delete_user(request, user_id):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-    
+'''
+@csrf_exempt
+def delete_user(request, user_id):
+    if request.method != "DELETE":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+
+        user_name = data.get("username", "Unknown")
+        role = data.get("role", "Unknown")
+
+        with transaction.atomic():
+
+            try:
+                user = read_users.objects.get(id=user_id)
+            except read_users.DoesNotExist:
+                return JsonResponse({"error": "User not found"}, status=404)
+
+            fname = user.fname
+
+            # ====================================================
+            # 1. DELETE READINGS (SAFE)
+            # ====================================================
+            readings.objects.filter(user_id=user_id).delete()
+
+            # ====================================================
+            # 2. DELETE BILLINGS (TRY MULTIPLE MATCHES)
+            # ====================================================
+            Billings.objects.filter(user_id=user_id).delete()
+            Billings.objects.filter(name=user.fname, phone=user.phone).delete()
+            Billings.objects.filter(phone=user.phone).delete()
+
+            # ====================================================
+            # 3. DELETE USER
+            # ====================================================
+            user.delete()
+
+            create_log(
+                username=user_name,
+                role=role,
+                action="DELETE",
+                table="waterusers",
+                record_id=user_id,
+                description=f"{user_name} deleted customer {fname}, readings, billings"
+            )
+
+        return JsonResponse({"message": "User fully deleted"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def delete_employee(request, emp_id):
