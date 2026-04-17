@@ -447,7 +447,8 @@ def users_login(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
+#====================================================================================
+#DELETING THE CUSTOMER FROM THE SYSTEM
 @csrf_exempt
 def delete_user(request, user_id):
     if request.method != "DELETE":
@@ -499,6 +500,7 @@ def delete_user(request, user_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+#DELETING AN EMPLOYEE FROM THE SYSTEM
 @csrf_exempt
 def delete_employee(request, emp_id):
     if request.method != "DELETE":
@@ -512,6 +514,7 @@ def delete_employee(request, emp_id):
         return JsonResponse({"error": "Not found"}, status=404)
     
 
+#UPDATING THE EMPLOYEE DETAILS
 @csrf_exempt
 def update_employee(request, emp_id):
     if request.method != "PUT":
@@ -597,6 +600,7 @@ def process_reading_update(user_id, new_cur_user, new_cur_sup, username=None, ro
 import pandas as pd
 from django.http import HttpResponse
 
+#DOWNLOAD A FORMATED EXCEL SHEET OF THE READINGS TABLE TO FILL AND UPLOAD
 def download_readings_template(request):
     data = readings.objects.all().values(
         "user_id", "name", "phone", "metre_num",
@@ -617,7 +621,7 @@ def download_readings_template(request):
 
     return response
 
-
+#UPLOAD THE FILLED EXCEL FILE OF THE READINGS DATA
 @csrf_exempt
 def upload_readings_excel(request):
     if request.method != "POST":
@@ -646,6 +650,80 @@ def upload_readings_excel(request):
                 )
 
         return JsonResponse({"message": "Excel uploaded and processed successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+#UPDAE CUSTOMER DETAILS IN ALL TABLES THAT HE EXISTS
+@csrf_exempt
+def update_user(request, user_id):
+    if request.method != "PUT":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+
+        fname = data.get("fname")
+        phone = data.get("phone")
+        metre_num = data.get("metre_num")
+        zone = data.get("zone")
+        rate = data.get("rate")
+
+        user_name = data.get("username", "Unknown")
+        role = data.get("role", "Unknown")
+
+        with transaction.atomic():
+
+            # ===============================
+            # 1. UPDATE WATERUSERS
+            # ===============================
+            try:
+                user = read_users.objects.get(id=user_id)
+            except read_users.DoesNotExist:
+                return JsonResponse({"error": "User not found"}, status=404)
+
+            old_name = user.fname
+            old_phone = user.phone
+
+            user.fname = fname or user.fname
+            user.phone = phone or user.phone
+            user.metre_num = metre_num or user.metre_num
+            user.zone = zone or user.zone
+            user.rate = rate or user.rate
+            user.save()
+
+            # ===============================
+            # 2. UPDATE READINGS (IF EXISTS)
+            # ===============================
+            readings.objects.filter(user_id=user_id).update(
+                name=fname,
+                phone=phone,
+                metre_num=metre_num,
+                rate=rate
+            )
+
+            # ===============================
+            # 3. UPDATE BILLINGS (IF EXISTS)
+            # ===============================
+            Billings.objects.filter(user_id=user_id).update(
+                name=fname,
+                phone=phone,
+                rate=rate
+            )
+
+            # ===============================
+            # LOG
+            # ===============================
+            create_log(
+                username=user_name,
+                role=role,
+                action="UPDATE",
+                table="waterusers",
+                record_id=user_id,
+                description=f"{role} updated customer {old_name} → {fname}"
+            )
+
+        return JsonResponse({"message": "User updated successfully"})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

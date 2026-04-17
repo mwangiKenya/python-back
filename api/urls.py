@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import  water_users, read_data, login_user, new_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel
+from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel
 
 urlpatterns =[
     path('water_users/', water_users, name='water_users'), #fetch water users data
@@ -26,4 +26,5 @@ urlpatterns =[
     path('update_employee/<int:emp_id>/', update_employee),
     path("download_readings_template/", download_readings_template),
     path("upload_readings_excel/", upload_readings_excel),
+    path('update_user/<int:user_id>/', update_user, name='update_user'),
 ]
