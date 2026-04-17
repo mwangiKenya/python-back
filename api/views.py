@@ -199,7 +199,8 @@ def new_user(request):
                 cur_sup=0,
                 cur_date=today,
                 units_used=0,
-                rate=rate
+                rate=rate,
+                metre_num=metre_num
             )
 
             # 🔥 LOG USER CREATION

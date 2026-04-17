@@ -26,6 +26,7 @@ class readings(models.Model):
     cur_date = models.DateField()
     units_used = models.IntegerField()
     rate = models.IntegerField()
+    metre_num = models.IntegerField()
 
     class Meta:
         db_table = 'readings'
