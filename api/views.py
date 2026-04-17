@@ -198,8 +198,8 @@ def new_user(request):
                 prev_user=0,
                 prev_sup=0,
                 prev_date=today,
-                cur_user=0,
-                cur_sup=0,
+                cur_user=None,
+                cur_sup=None,
                 cur_date=today,
                 units_used=0,
                 rate=rate,
@@ -268,8 +268,8 @@ def submit_new_reading(request):
 
                 reading.prev_user = new_cur_user or prev_user
                 reading.prev_sup = new_cur_sup or prev_sup
-                reading.cur_user = 0
-                reading.cur_sup = 0
+                reading.cur_user = None
+                reading.cur_sup = None
                 reading.units_used = units_used
                 reading.cur_date = date.today()
                 reading.save()
@@ -446,46 +446,7 @@ def users_login(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-'''
-@csrf_exempt
-def delete_user(request, user_id):
-    if request.method != "DELETE":
-        return JsonResponse({"error": "Invalid request"}, status=400)
 
-    try:
-        data = json.loads(request.body) if request.body else {}
-
-        user_name = data.get("username", "Unknown")
-        role = data.get("role", "Unknown")
-
-        with transaction.atomic():
-            try:
-                user = read_users.objects.get(id=user_id)
-            except read_users.DoesNotExist:
-                return JsonResponse({"error": "User not found"}, status=404)
-
-            fname = user.fname
-
-            # THIS deletes BOTH user + readings automatically
-            #  Delete billings explicitly
-            Billings.objects.filter(user_id=user_id).delete()
-            user.delete()
-
-            # LOG DELETE ACTION
-            create_log(
-                username=user_name,
-                role=role,
-                action="DELETE",
-                table="waterusers",
-                record_id=user_id,
-                description=f"{user_name} deleted customer {fname}"
-            )
-
-        return JsonResponse({"message": "User and related readings deleted successfully"})
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-'''
 @csrf_exempt
 def delete_user(request, user_id):
     if request.method != "DELETE":
