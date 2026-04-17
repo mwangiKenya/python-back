@@ -531,3 +531,120 @@ def update_employee(request, emp_id):
         return JsonResponse({"error": "Not found"}, status=404)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+#==============================================================================================
+#=================================================================================
+#===========================================================================================
+
+def process_reading_update(user_id, new_cur_user, new_cur_sup, username=None, role=None):
+    reading = readings.objects.get(user_id=user_id)
+
+    prev_user = reading.prev_user
+    prev_sup = reading.prev_sup
+
+    # LOG USER READING
+    if new_cur_user is not None:
+        create_log(
+            username, role, "UPDATE", "readings", reading.id,
+            f"updated user reading {prev_user} → {new_cur_user}",
+            "cur_user", prev_user, new_cur_user
+        )
+
+    if new_cur_sup is not None:
+        create_log(
+            username, role, "UPDATE", "readings", reading.id,
+            f"updated sup reading {prev_sup} → {new_cur_sup}",
+            "cur_sup", prev_sup, new_cur_sup
+        )
+
+    # CALCULATION
+    units_used = new_cur_user - prev_user
+
+    reading.prev_user = new_cur_user or prev_user
+    reading.prev_sup = new_cur_sup or prev_sup
+    reading.cur_user = None
+    reading.cur_sup = None
+    reading.units_used = units_used
+    reading.cur_date = date.today()
+    reading.save()
+
+    # BILLING
+    bill_amount = units_used * reading.rate if units_used > 0 else 300
+
+    billing, created = Billings.objects.get_or_create(
+        user_id=user_id,
+        defaults={
+            "name": reading.name,
+            "phone": reading.phone,
+            "billed_on": date.today(),
+            "units_used": units_used,
+            "rate": reading.rate,
+            "bill": bill_amount,
+            "paid": 0,
+            "bal": bill_amount,
+            "status": "Unpaid"
+        }
+    )
+
+    if not created:
+        billing.units_used = units_used
+        billing.bill = bill_amount
+        billing.bal = bill_amount - billing.paid
+        billing.save()
+
+
+import pandas as pd
+from django.http import HttpResponse
+
+def download_readings_template(request):
+    data = readings.objects.all().values(
+        "user_id", "name", "phone", "metre_num",
+        "prev_user", "prev_sup"
+    )
+
+    df = pd.DataFrame(list(data))
+
+    df["cur_user"] = ""
+    df["cur_sup"] = ""
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename=readings_template.xlsx'
+
+    df.to_excel(response, index=False)
+
+    return response
+
+
+@csrf_exempt
+def upload_readings_excel(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        file = request.FILES["file"]
+        df = pd.read_excel(file)
+
+        with transaction.atomic():
+            for _, row in df.iterrows():
+
+                user_id = row["user_id"]
+                cur_user = row["cur_user"]
+                cur_sup = row["cur_sup"]
+
+                if pd.isna(cur_user) or pd.isna(cur_sup):
+                    continue
+
+                process_reading_update(
+                    user_id=int(user_id),
+                    new_cur_user=int(cur_user),
+                    new_cur_sup=int(cur_sup),
+                    username="excel_upload",
+                    role="system"
+                )
+
+        return JsonResponse({"message": "Excel uploaded and processed successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
