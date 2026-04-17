@@ -368,9 +368,6 @@ def total_paid(request):
     total = Billings.objects.aggregate(total_paid=Sum('paid'))['total_paid'] or 0
     return JsonResponse({"total_paid": round(float(total), 2)})
 
-def avg_units(request):
-    avg = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
-    return JsonResponse({"avg_units": round(float(avg), 2)})
 
 def total_units(request):
     total = Billings.objects.aggregate(total_units=Sum('units_used'))['total_units'] or 0
@@ -379,6 +376,10 @@ def total_units(request):
 def total_cust(request):
     total = read_users.objects.aggregate(total_cust=Count('id'))['total_cust'] or 0
     return JsonResponse({"total_cust": total})
+def avg_units(request):
+    avg = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
+    return JsonResponse({"avg_units": round(float(avg), 2)})
+
 
 # ============================================================
 # EMPLOYEE MANAGEMENT
