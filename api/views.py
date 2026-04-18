@@ -363,6 +363,58 @@ def update_paid(request):
     try:
         data = json.loads(request.body)
 
+        # ===============================
+        # CASE 1: BULK UPDATE (LIST)
+        # ===============================
+        if isinstance(data, list):
+            updated = []
+
+            with transaction.atomic():
+                for item in data:
+                    billing = Billings.objects.get(id=item.get("id"))
+                    old_paid = billing.paid
+
+                    new_paid = Decimal(str(item.get("paid", 0)))
+
+                    billing.paid = new_paid
+                    billing.bal = billing.bill - new_paid
+
+                    if new_paid == 0:
+                        billing.status = "Unpaid"
+                    elif new_paid < billing.bill:
+                        billing.status = "Partially Paid"
+                    else:
+                        billing.status = "Paid"
+
+                    billing.save()
+
+                    create_log(
+                        item.get("username", "system"),
+                        item.get("role", "system"),
+                        "UPDATE",
+                        "billings",
+                        billing.id,
+                        f"bulk update: {old_paid} → {new_paid}",
+                        "paid",
+                        old_paid,
+                        new_paid
+                    )
+
+                    updated.append({
+                        "id": billing.id,
+                        "paid": billing.paid,
+                        "bal": billing.bal,
+                        "status": billing.status
+                    })
+
+            return JsonResponse({
+                "message": "Bulk payment updated successfully",
+                "updated": updated
+            })
+
+        # ===============================
+        # CASE 2: SINGLE UPDATE 
+        # ===============================
         billing = Billings.objects.get(id=data.get("id"))
         old_paid = billing.paid
 
@@ -380,7 +432,6 @@ def update_paid(request):
 
         billing.save()
 
-        # 🔥 LOG PAYMENT
         create_log(
             data.get("username"),
             data.get("role"),
@@ -393,7 +444,13 @@ def update_paid(request):
             new_paid
         )
 
-        return JsonResponse({"message": "Payment updated"})
+        return JsonResponse({
+            "message": "Payment updated",
+            "id": billing.id,
+            "paid": billing.paid,
+            "bal": billing.bal,
+            "status": billing.status
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
