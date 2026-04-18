@@ -87,10 +87,7 @@ def hist_data(request):
 # FETCH ALL BILLINGS
 # ============================================================
 def bill(request):
-    status = request.GET.get("status")
     bills = Billings.objects.all()
-    if status:
-        bills = bills.filter(name__icontains=status)
     data = []
 
     for b in bills:
