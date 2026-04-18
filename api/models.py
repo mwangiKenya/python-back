@@ -1,4 +1,5 @@
 from django.db import models
+from datetime import date
 
 class read_users(models.Model):
     id = models.AutoField(primary_key=True)  # ✅ FIX
@@ -107,7 +108,7 @@ class history(models.Model):
     field = models.CharField(max_length=50)
     old_val = models.IntegerField()
     new_val = models.IntegerField()
-    changed_on = models.DateField()
+    changed_on = models.DateField(default=date.today)
 
     class Meta:
         db_table = 'history'
