@@ -135,7 +135,9 @@ DATABASES = {
         'PORT': '6543',
         'OPTIONS': {
             'sslmode': 'require',
+            'connect_timeout': 5,   # ⬅️ prevents infinite hanging
         },
+        'CONN_MAX_AGE': 0,  # ⬅️ CRITICAL FIX
     }
 }
 # Password validation

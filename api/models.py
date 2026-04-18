@@ -100,3 +100,15 @@ class Users(models.Model):
     class Meta:
         db_table = 'users'
         managed = False
+
+class history(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100)
+    field = models.CharField(max_length=50)
+    old_val = models.IntegerField()
+    new_val = models.IntegerField()
+    changed_on = models.DateField()
+
+    class Meta:
+        db_table = 'history'
+        managed = False

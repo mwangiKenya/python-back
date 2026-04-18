@@ -1,6 +1,6 @@
 
 from django.http import JsonResponse, HttpResponse
-from .models import read_users, readings, Admin, Billings, Logs, Users
+from .models import read_users, readings, Admin, Billings, Logs, Users, history
 from django.views.decorators.csrf import csrf_exempt
 import json
 import secrets
@@ -28,6 +28,14 @@ def create_log(username, role, action, table, record_id, description,
         old_val=str(old_val) if old_val is not None else None,
         new_val=str(new_val) if new_val is not None else None,
         description=description
+    )
+
+def create_hist(name, field, old_val, new_val):
+    history.objects.create(
+        name=name,
+        field=field,
+        old_val=old_val,
+        new_val=new_val
     )
 
 # ============================================================
@@ -248,6 +256,9 @@ def submit_new_reading(request):
                 prev_user = reading.prev_user
                 prev_sup = reading.prev_sup
 
+                #GET THE VALUES TO INSERT INTO HISTORY TABLE
+                name = reading.name
+
                 # 🔥 LOG CHANGES
                 if new_cur_user != 0:
                     create_log(
@@ -255,12 +266,18 @@ def submit_new_reading(request):
                         f"{role} updated user reading from {prev_user} to {new_cur_user}",
                         "cur_user", prev_user, new_cur_user
                     )
+                    create_hist(
+                        name, "user reading", prev_user, new_cur_user
+                    )
 
                 if new_cur_sup != 0:
                     create_log(
                         user_name, role, "UPDATE", "readings", reading.id,
                         f"{role} updated sup reading from {prev_sup} to {new_cur_sup}",
                         "cur_sup", prev_sup, new_cur_sup
+                    )
+                    create_hist(
+                        name, "sup reading", prev_sup, new_cur_sup
                     )
 
                 # CALCULATIONS
@@ -305,7 +322,6 @@ def submit_new_reading(request):
                         user_name, role, "UPDATE", "billings", billing.id,
                         f"{role} updated billing for {reading.name}"
                     )
-
         return JsonResponse({"message": "Saved successfully"})
 
     except Exception as e:
