@@ -57,7 +57,20 @@ def water_users(request):
         })
 
     return JsonResponse(data, safe=False)
-
+#==============================================================
+#FETCH THE READING HISTORY DATA
+def hist_data(request):
+    hist = history.objects.all()
+    data = []
+    for h in hist:
+        data.append({
+            'id' : h.id,
+            'name' : h.name,
+            'field' : h.field,
+            'old_val' : h.old_val,
+            'new_val' : h.new_val,
+            'changes_on' : h.changed_on.strftime('%Y-%m-%d') if h.changed_on else None
+        })
 # ============================================================
 # FETCH ALL BILLINGS
 # ============================================================
