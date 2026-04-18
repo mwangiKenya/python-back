@@ -61,19 +61,7 @@ class Billings(models.Model):
     class Meta:
         db_table = 'billings'
         managed = False
-'''
-class Logs(models.Model):
-    id = models.AutoField(primary_key=True)  # ✅ FIX
-    reading = models.ForeignKey('readings', on_delete=models.CASCADE, db_column='reading')  # ✅ FK
-    field_changed = models.CharField(max_length=100)
-    old_val = models.IntegerField()
-    new_val = models.IntegerField()
-    changed_at = models.DateField()
 
-    class Meta:
-        db_table = 'logs'
-        managed = False
-'''
 class Logs(models.Model):
     id = models.AutoField(primary_key=True)
     username = models.CharField(max_length=100)   # who performed action
@@ -108,7 +96,7 @@ class history(models.Model):
     field = models.CharField(max_length=50)
     old_val = models.IntegerField()
     new_val = models.IntegerField()
-    changed_on = models.DateField(default=date.today)
+    changed_on = models.DateField(auto_now_add=True)
 
     class Meta:
         db_table = 'history'
