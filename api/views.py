@@ -71,6 +71,7 @@ def hist_data(request):
             'new_val' : h.new_val,
             'changes_on' : h.changed_on.strftime('%Y-%m-%d') if h.changed_on else None
         })
+    return JsonResponse(data, safe=False)
 # ============================================================
 # FETCH ALL BILLINGS
 # ============================================================
