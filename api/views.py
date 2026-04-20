@@ -829,7 +829,7 @@ def update_user(request, user_id):
     
 
 #SEND BILLING SMS
-
+'''
 @api_view(['POST'])
 def send_sms_api(request):
     phone = request.data.get("phone")
@@ -841,3 +841,4 @@ def send_sms_api(request):
     result = send_sms(phone, message)
 
     return Response({"message": "SMS sent", "data": result})
+'''
