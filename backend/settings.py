@@ -199,3 +199,6 @@ CORS_ALLOW_CREDENTIALS = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+AT_USERNAME = "sandbox"
+AT_API_KEY = "atsk_5c9dfc1f83211c51983fc17708ede63184ab20f43eca418febf20fb23d868e879fbbda8d"

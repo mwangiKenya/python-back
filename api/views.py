@@ -11,6 +11,7 @@ from django.db.models import Sum, Avg, Count
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
+from .sms import send_sms
 
 # ============================================================
 # HELPER FUNCTION → CREATE LOG (Avoid repeating code everywhere)
@@ -825,3 +826,18 @@ def update_user(request, user_id):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+#SEND BILLING SMS
+
+@api_view(['POST'])
+def send_sms_api(request):
+    phone = request.data.get("phone")
+    message = request.data.get("message")
+
+    if not phone or not message:
+        return Response({"error": "Missing data"}, status=400)
+
+    result = send_sms(phone, message)
+
+    return Response({"message": "SMS sent", "data": result})
