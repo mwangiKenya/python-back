@@ -28,5 +28,5 @@ urlpatterns =[
     path("upload_readings_excel/", upload_readings_excel),
     path('update_user/<int:user_id>/', update_user, name='update_user'),
     path('hist_data/', hist_data, name='hist_data'),
-    path('send-sms/', send_sms_api),
+    path('send_sms_api/', send_sms_api, name='send_sms_api'),
 ]
