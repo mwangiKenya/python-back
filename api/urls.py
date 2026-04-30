@@ -29,5 +29,5 @@ urlpatterns =[
     path('update_user/<int:user_id>/', update_user, name='update_user'),
     path('hist_data/', hist_data, name='hist_data'),
     #path('send_sms_api/', send_sms_api, name='send_sms_api'),
-    path("send-sms/", send_sms_view),
+    path("send_sms_view/", send_sms_view, name='send_sms_view'),
 ]
