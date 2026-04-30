@@ -829,16 +829,60 @@ def update_user(request, user_id):
     
 
 #SEND BILLING SMS
-'''
-@api_view(['POST'])
-def send_sms_api(request):
-    phone = request.data.get("phone")
-    message = request.data.get("message")
+import requests
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
-    if not phone or not message:
-        return Response({"error": "Missing data"}, status=400)
+#ADVANTA CREDENTIALS
+API_URL = "https://quicksms.advantasms.com/api/services/sendbulk"
+PARTNER_ID = "16256"
+API_KEY = "bc1bc562ccb7c72732e7fa0add447129"
+SHORTCODE = "AdvantaSMS"
 
-    result = send_sms(phone, message)
 
-    return Response({"message": "SMS sent", "data": result})
-'''
+def send_bulk_sms(customers):
+    payload = {
+        "count": len(customers),
+        "smslist": []
+    }
+
+    for i, customer in enumerate(customers):
+        payload["smslist"].append({
+            "partnerID": PARTNER_ID,
+            "apikey": API_KEY,
+            "pass_type": "plain",
+            "clientsmsid": i + 1,
+            "mobile": customer["phone"],
+            "message": customer["message"],
+            "shortcode": SHORTCODE
+        })
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(API_URL, json=payload, headers=headers)
+
+    return response.json()
+
+
+@csrf_exempt
+def send_sms_view(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            customers = data.get("customers", [])
+
+            if not customers:
+                return JsonResponse({"error": "No customers selected"}, status=400)
+
+            result = send_bulk_sms(customers)
+
+            return JsonResponse({
+                "message": "SMS sent successfully",
+                "data": result
+            })
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)

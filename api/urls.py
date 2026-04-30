@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data
+from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data, send_sms_view
 
 urlpatterns =[
     path('water_users/', water_users, name='water_users'), #fetch water users data
@@ -29,4 +29,5 @@ urlpatterns =[
     path('update_user/<int:user_id>/', update_user, name='update_user'),
     path('hist_data/', hist_data, name='hist_data'),
     #path('send_sms_api/', send_sms_api, name='send_sms_api'),
+    path("api/send-sms/", send_sms_view),
 ]
