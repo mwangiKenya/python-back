@@ -827,7 +827,7 @@ def update_user(request, user_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
+'''
 #SEND BILLING SMS
 import requests
 import json
@@ -886,3 +886,89 @@ def send_sms_view(request):
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
+'''
+
+import json
+import requests
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+# ADVANTA CREDENTIALS
+API_URL = "https://quicksms.advantasms.com/api/services/sendbulk"
+PARTNER_ID = "16256"
+API_KEY = "bc1bc562ccb7c72732e7fa0add447129"
+SHORTCODE = "AdvantaSMS"
+
+
+def send_bulk_sms(customers):
+    payload = {
+        "count": len(customers),
+        "smslist": []
+    }
+
+    for i, customer in enumerate(customers):
+        payload["smslist"].append({
+            "partnerID": PARTNER_ID,
+            "apikey": API_KEY,
+            "pass_type": "plain",
+            "clientsmsid": i + 1,
+            "mobile": customer.get("phone"),
+            "message": customer.get("message"),
+            "shortcode": SHORTCODE
+        })
+
+    try:
+        response = requests.post(
+            API_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=20  # IMPORTANT: prevents Render crash
+        )
+
+        # Safe JSON handling
+        try:
+            return response.json()
+        except Exception:
+            return {
+                "error": "Invalid JSON from SMS provider",
+                "status_code": response.status_code,
+                "raw_response": response.text
+            }
+
+    except requests.exceptions.Timeout:
+        return {"error": "SMS request timed out"}
+
+    except requests.exceptions.RequestException as e:
+        return {"error": f"SMS request failed: {str(e)}"}
+
+
+@csrf_exempt
+def send_sms_view(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        customers = data.get("customers", [])
+
+        if not customers:
+            return JsonResponse({"error": "No customers selected"}, status=400)
+
+        result = send_bulk_sms(customers)
+
+        return JsonResponse({
+            "message": "SMS process completed",
+            "result": result
+        }, status=200)
+
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    except Exception as e:
+        # prevents Render worker crash
+        print("SMS VIEW ERROR:", str(e))
+
+        return JsonResponse({
+            "error": "Internal server error",
+            "details": str(e)
+        }, status=500)
