@@ -827,7 +827,7 @@ def update_user(request, user_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-'''
+
 #SEND BILLING SMS
 import requests
 import json
@@ -887,9 +887,7 @@ def send_sms_view(request):
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
 
-===============================================================================
-==============================================================================
-=============================================================================
+
 '''
 
 import json
@@ -976,3 +974,5 @@ def send_sms_view(request):
             "error": "Internal server error",
             "details": str(e)
         }, status=500)
+
+'''
