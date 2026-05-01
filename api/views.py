@@ -340,7 +340,12 @@ def submit_new_reading(request):
                 if not created:
                     billing.units_used = units_used
                     billing.bill = bill
-                    billing.bal = bill - billing.paid
+
+                    # 🔥 RESET PAYMENT
+                    billing.paid = 0
+                    billing.bal = bill
+                    billing.status = "Unpaid"
+
                     billing.save()
 
                     # 🔥 LOG BILL UPDATE
