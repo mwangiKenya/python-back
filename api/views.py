@@ -343,6 +343,7 @@ def submit_new_reading(request):
                     billing.bill = bill
 
                     # 🔥 RESET PAYMENT
+                    billing.b_cd = billing.bal
                     billing.paid = 0
                     billing.bal = bill + billing.bal
                     billing.status = "Unpaid"
