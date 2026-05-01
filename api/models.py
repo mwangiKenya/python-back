@@ -57,6 +57,7 @@ class Billings(models.Model):
     paid = models.FloatField()
     bal = models.FloatField()
     status = models.CharField(max_length=100)
+    b_cd = models.FloatField()
 
     class Meta:
         db_table = 'billings'
