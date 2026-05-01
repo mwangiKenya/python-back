@@ -887,92 +887,82 @@ def send_sms_view(request):
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
 
+#DOWNLOAD BILLINGS EXCEL, FILL AND UPLOAD IT
+import pandas as pd
 
-'''
+def download_billings_template(request):
+    data = Billings.objects.all().values(
+        "id", "name", "phone", "bill", "paid"
+    )
 
-import json
-import requests
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+    df = pd.DataFrame(list(data))
 
-# ADVANTA CREDENTIALS
-API_URL = "https://quicksms.advantasms.com/api/services/sendbulk"
-PARTNER_ID = "16256"
-API_KEY = "bc1bc562ccb7c72732e7fa0add447129"
-SHORTCODE = "AdvantaSMS"
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename=billings_template.xlsx'
 
+    df.to_excel(response, index=False)
 
-def send_bulk_sms(customers):
-    payload = {
-        "count": len(customers),
-        "smslist": []
-    }
+    return response
 
-    for i, customer in enumerate(customers):
-        payload["smslist"].append({
-            "partnerID": PARTNER_ID,
-            "apikey": API_KEY,
-            "pass_type": "plain",
-            "clientsmsid": i + 1,
-            "mobile": customer.get("phone"),
-            "message": customer.get("message"),
-            "shortcode": SHORTCODE
-        })
-
-    try:
-        response = requests.post(
-            API_URL,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=20  # IMPORTANT: prevents Render crash
-        )
-
-        # Safe JSON handling
-        try:
-            return response.json()
-        except Exception:
-            return {
-                "error": "Invalid JSON from SMS provider",
-                "status_code": response.status_code,
-                "raw_response": response.text
-            }
-
-    except requests.exceptions.Timeout:
-        return {"error": "SMS request timed out"}
-
-    except requests.exceptions.RequestException as e:
-        return {"error": f"SMS request failed: {str(e)}"}
 
 
 @csrf_exempt
-def send_sms_view(request):
+def upload_billings_excel(request):
     if request.method != "POST":
-        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+        return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
-        data = json.loads(request.body.decode("utf-8"))
-        customers = data.get("customers", [])
+        file = request.FILES["file"]
+        df = pd.read_excel(file)
 
-        if not customers:
-            return JsonResponse({"error": "No customers selected"}, status=400)
+        updated = []
 
-        result = send_bulk_sms(customers)
+        with transaction.atomic():
+            for _, row in df.iterrows():
+
+                billing_id = row.get("id")
+                paid = row.get("paid")
+
+                if pd.isna(billing_id) or pd.isna(paid):
+                    continue
+
+                billing = Billings.objects.get(id=int(billing_id))
+
+                old_paid = billing.paid
+                new_paid = Decimal(str(paid))
+
+                billing.paid = new_paid
+                billing.bal = billing.bill - new_paid
+
+                if new_paid == 0:
+                    billing.status = "Unpaid"
+                elif new_paid < billing.bill:
+                    billing.status = "Partially Paid"
+                else:
+                    billing.status = "Paid"
+
+                billing.save()
+
+                create_log(
+                    "excel_upload",
+                    "system",
+                    "UPDATE",
+                    "billings",
+                    billing.id,
+                    f"Excel update: {old_paid} → {new_paid}",
+                    "paid",
+                    old_paid,
+                    new_paid
+                )
+
+                updated.append(billing.id)
 
         return JsonResponse({
-            "message": "SMS process completed",
-            "result": result
-        }, status=200)
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+            "message": "Excel uploaded successfully",
+            "updated_count": len(updated)
+        })
 
     except Exception as e:
-        # prevents Render worker crash
-        print("SMS VIEW ERROR:", str(e))
-
-        return JsonResponse({
-            "error": "Internal server error",
-            "details": str(e)
-        }, status=500)
-
-'''
+        return JsonResponse({"error": str(e)}, status=500)
