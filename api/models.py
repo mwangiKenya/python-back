@@ -28,6 +28,8 @@ class readings(models.Model):
     units_used = models.IntegerField()
     rate = models.IntegerField()
     metre_num = models.IntegerField()
+    mid_user = models.IntegerField(null=True, blank=True)
+    mid_sup = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'readings'

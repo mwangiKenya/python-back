@@ -152,7 +152,9 @@ def read_data(request):
             'cur_user': r.cur_user,
             'cur_sup': r.cur_sup,
             'cur_date' : r.cur_date.strftime('%Y-%m-%d') if r.cur_date else None,
-            'rate': r.rate
+            'rate': r.rate,
+            'mid_user':r.mid_user,
+            'mid_sup': r.mid_sup
         })
 
     return JsonResponse(data, safe=False)
@@ -272,13 +274,22 @@ def submit_new_reading(request):
 
             for item in updates:
                 user_id = item.get("user_id")
-                new_cur_user = int(item.get("cur_user", 0))
+                cur_user = item.get("cur_user")
+                new_cur_user = int(cur_user) if cur_user not in [None, ""] else None
                 new_cur_sup = int(item.get("cur_sup", 0))
 
                 user_name = item.get("username")
                 role = item.get("role")
 
                 reading = readings.objects.get(user_id=user_id)
+                mid_user = item.get("mid_user")
+                mid_sup = item.get("mid_sup")
+
+                if mid_user is not None:
+                    reading.mid_user = int(mid_user)
+
+                if mid_sup is not None:
+                    reading.mid_sup = int(mid_sup)
 
                 prev_user = reading.prev_user
                 prev_sup = reading.prev_sup
@@ -646,66 +657,129 @@ def update_employee(request, emp_id):
 #=================================================================================
 #===========================================================================================
 
-def process_reading_update(user_id, new_cur_user, new_cur_sup, username=None, role=None):
-    reading = readings.objects.get(user_id=user_id)
+def process_reading_update(
+    user_id,
+    new_cur_user=None,
+    new_cur_sup=None,
+    mid_user=None,
+    mid_sup=None,
+    username="system",
+    role="system"
+):
+    try:
+        reading = readings.objects.get(user_id=user_id)
+    except readings.DoesNotExist:
+        create_log(username, role, "ERROR", "readings", user_id,
+                   "Reading record not found")
+        return
 
-    prev_user = reading.prev_user
-    prev_sup = reading.prev_sup
+    prev_user = reading.prev_user or 0
+    prev_sup = reading.prev_sup or 0
 
-    # LOG USER READING
+    # =========================
+    # MID READINGS
+    # =========================
+    if mid_user is not None:
+        create_log(username, role, "UPDATE", "readings", reading.id,
+                   f"mid_user {reading.mid_user} → {mid_user}",
+                   "mid_user", reading.mid_user, mid_user)
+        reading.mid_user = mid_user
+
+    if mid_sup is not None:
+        create_log(username, role, "UPDATE", "readings", reading.id,
+                   f"mid_sup {reading.mid_sup} → {mid_sup}",
+                   "mid_sup", reading.mid_sup, mid_sup)
+        reading.mid_sup = mid_sup
+
+    # =========================
+    # IF NO CURRENT READING
+    # =========================
+    if new_cur_user is None and new_cur_sup is None:
+        reading.save()
+        return
+
+    # =========================
+    # SAFE UNIT CALCULATION
+    # =========================
+    units_used = reading.units_used or 0
+
     if new_cur_user is not None:
-        create_log(
-            username, role, "UPDATE", "readings", reading.id,
-            f"updated user reading {prev_user} → {new_cur_user}",
-            "cur_user", prev_user, new_cur_user
-        )
+        try:
+            units_used = int(new_cur_user) - int(prev_user)
+        except Exception:
+            create_log(username, role, "ERROR", "readings", reading.id,
+                       "Invalid numeric reading input")
+            return
+
+        if units_used < 0:
+            units_used = 0
+
+    # =========================
+    # LOG CHANGES
+    # =========================
+    if new_cur_user is not None:
+        create_log(username, role, "UPDATE", "readings", reading.id,
+                   f"user reading {prev_user} → {new_cur_user}",
+                   "cur_user", prev_user, new_cur_user)
 
     if new_cur_sup is not None:
-        create_log(
-            username, role, "UPDATE", "readings", reading.id,
-            f"updated sup reading {prev_sup} → {new_cur_sup}",
-            "cur_sup", prev_sup, new_cur_sup
-        )
+        create_log(username, role, "UPDATE", "readings", reading.id,
+                   f"sup reading {prev_sup} → {new_cur_sup}",
+                   "cur_sup", prev_sup, new_cur_sup)
 
-    # CALCULATION
-    units_used = new_cur_user - prev_user
+    # =========================
+    # UPDATE READING
+    # =========================
+    if new_cur_user is not None:
+        reading.prev_user = new_cur_user
 
-    reading.prev_user = new_cur_user or prev_user
-    reading.prev_sup = new_cur_sup or prev_sup
+    if new_cur_sup is not None:
+        reading.prev_sup = new_cur_sup
+
+    reading.units_used = units_used
     reading.cur_user = None
     reading.cur_sup = None
-    reading.units_used = units_used
     reading.cur_date = date.today()
     reading.save()
 
+    # =========================
     # BILLING
-    bill_amount = units_used * reading.rate if units_used > 0 else 300
+    # =========================
+    if new_cur_user is not None:
+        rate = reading.rate or 0
+        bill_amount = units_used * rate
 
-    billing, created = Billings.objects.get_or_create(
-        user_id=user_id,
-        defaults={
-            "name": reading.name,
-            "phone": reading.phone,
-            "billed_on": date.today(),
-            "units_used": units_used,
-            "rate": reading.rate,
-            "bill": bill_amount,
-            "paid": 0,
-            "bal": bill_amount,
-            "status": "Unpaid"
-        }
-    )
+        if units_used == 0:
+            bill_amount = 300
 
-    if not created:
-        billing.units_used = units_used
-        billing.bill = bill_amount
-        billing.bal = bill_amount - billing.paid
-        billing.save()
+        billing, created = Billings.objects.get_or_create(
+            user_id=user_id,
+            billed_on=date.today(),
+            defaults={
+                "name": reading.name,
+                "phone": reading.phone,
+                "units_used": units_used,
+                "rate": rate,
+                "bill": bill_amount,
+                "paid": 0,
+                "bal": bill_amount,
+                "status": "Unpaid"
+            }
+        )
 
+        if not created:
+            billing.units_used = units_used
+            billing.bill = bill_amount
+            billing.bal = bill_amount - billing.paid
 
-import pandas as pd
-from django.http import HttpResponse
+            if billing.paid == 0:
+                billing.status = "Unpaid"
+            elif billing.paid < bill_amount:
+                billing.status = "Partially Paid"
+            else:
+                billing.status = "Paid"
 
+            billing.save()
 #DOWNLOAD A FORMATED EXCEL SHEET OF THE READINGS TABLE TO FILL AND UPLOAD
 def download_readings_template(request):
     data = readings.objects.all().values(
@@ -714,7 +788,9 @@ def download_readings_template(request):
     )
 
     df = pd.DataFrame(list(data))
-
+    
+    df["mid_user"] = ""
+    df["mid_sup"] = ""
     df["cur_user"] = ""
     df["cur_sup"] = ""
 
@@ -727,35 +803,75 @@ def download_readings_template(request):
 
     return response
 
-#UPLOAD THE FILLED EXCEL FILE OF THE READINGS DATA
 @csrf_exempt
 def upload_readings_excel(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
-        file = request.FILES["file"]
+        file = request.FILES.get("file")
+        if not file:
+            return JsonResponse({"error": "No file uploaded"}, status=400)
+
         df = pd.read_excel(file)
 
+        required_columns = ["user_id"]
+        for col in required_columns:
+            if col not in df.columns:
+                return JsonResponse({"error": f"Missing required column: {col}"}, status=400)
+
+        processed = 0
+        skipped = 0
+
         with transaction.atomic():
-            for _, row in df.iterrows():
+            for index, row in df.iterrows():
+                try:
+                    user_id = row.get("user_id")
 
-                user_id = row["user_id"]
-                cur_user = row["cur_user"]
-                cur_sup = row["cur_sup"]
+                    if pd.isna(user_id):
+                        skipped += 1
+                        continue
 
-                if pd.isna(cur_user) or pd.isna(cur_sup):
+                    # -------- READ VALUES --------
+                    cur_user = row.get("cur_user")
+                    cur_sup = row.get("cur_sup")
+                    mid_user = row.get("mid_user")
+                    mid_sup = row.get("mid_sup")
+
+                    # -------- CLEAN NaN --------
+                    cur_user = None if pd.isna(cur_user) else int(cur_user)
+                    cur_sup = None if pd.isna(cur_sup) else int(cur_sup)
+                    mid_user = None if pd.isna(mid_user) else int(mid_user)
+                    mid_sup = None if pd.isna(mid_sup) else int(mid_sup)
+
+                    # -------- SKIP EMPTY ROW --------
+                    if cur_user is None and cur_sup is None and mid_user is None and mid_sup is None:
+                        skipped += 1
+                        continue
+
+                    # -------- PROCESS UPDATE --------
+                    process_reading_update(
+                        user_id=int(user_id),
+                        new_cur_user=cur_user,
+                        new_cur_sup=cur_sup,
+                        mid_user=mid_user,
+                        mid_sup=mid_sup,
+                        username="excel_upload",
+                        role="system"
+                    )
+
+                    processed += 1
+
+                except Exception as row_error:
+                    print(f"Row {index} skipped: {row_error}")
+                    skipped += 1
                     continue
 
-                process_reading_update(
-                    user_id=int(user_id),
-                    new_cur_user=int(cur_user),
-                    new_cur_sup=int(cur_sup),
-                    username="excel_upload",
-                    role="system"
-                )
-
-        return JsonResponse({"message": "Excel uploaded and processed successfully"})
+        return JsonResponse({
+            "message": "Excel uploaded successfully",
+            "processed_rows": processed,
+            "skipped_rows": skipped
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
