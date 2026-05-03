@@ -275,8 +275,13 @@ def submit_new_reading(request):
             for item in updates:
                 user_id = item.get("user_id")
                 cur_user = item.get("cur_user")
+                #new_cur_user = int(cur_user) if cur_user not in [None, ""] else None
+                #new_cur_sup = int(item.get("cur_sup", 0))
+                cur_user = item.get("cur_user")
+                cur_sup = item.get("cur_sup")
+
                 new_cur_user = int(cur_user) if cur_user not in [None, ""] else None
-                new_cur_sup = int(item.get("cur_sup", 0))
+                new_cur_sup = int(cur_sup) if cur_sup not in [None, ""] else None
 
                 user_name = item.get("username")
                 role = item.get("role")
@@ -319,10 +324,17 @@ def submit_new_reading(request):
                     )
 
                 # CALCULATIONS
-                units_used = new_cur_user - prev_user
+                #units_used = new_cur_user - prev_user
+                if new_cur_user is not None:
+                    units_used = new_cur_user - prev_user
+                else:
+                    units_used = reading.units_used or 0
 
-                reading.prev_user = new_cur_user or prev_user
-                reading.prev_sup = new_cur_sup or prev_sup
+                if new_cur_user is not None:
+                    reading.prev_user = new_cur_user
+
+                if new_cur_sup is not None:
+                    reading.prev_sup = new_cur_sup
                 reading.cur_user = None
                 reading.cur_sup = None
                 reading.units_used = units_used
