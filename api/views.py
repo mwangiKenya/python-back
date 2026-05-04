@@ -359,8 +359,8 @@ def submit_new_reading(request):
                         "bal": bill,
                         "status": "Unpaid",
                         "b_cd" : 0,
-                        "prev_user" : reading.prev_user,
-                        "cur_user" : reading.cur_user
+                        "prev_user" : prev_user,
+                        "cur_user" : new_cur_user
                     }
                 )
 
