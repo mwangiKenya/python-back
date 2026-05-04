@@ -356,7 +356,7 @@ def submit_new_reading(request):
                         "rate": reading.rate,
                         "bill": bill,
                         "paid": 0,
-                        "bal": bill,
+                        "bal": bill  + billing.b_cd,
                         "status": "Unpaid",
                         #"b_cd" : 0,
                         "prev_user" : prev_user,
