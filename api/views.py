@@ -357,7 +357,9 @@ def submit_new_reading(request):
                         "bill": bill,
                         "paid": 0,
                         "bal": bill,
-                        "status": "Unpaid"
+                        "status": "Unpaid",
+                        "prev_user" : reading.prev_user,
+                        "cur_user" : reading.cur_user
                     }
                 )
 
@@ -365,7 +367,7 @@ def submit_new_reading(request):
                     billing.units_used = units_used
                     billing.bill = bill
 
-                    # 🔥 RESET PAYMENT
+                    #RESET PAYMENT
                     billing.b_cd = billing.bal
                     billing.paid = 0
                     billing.bal = bill + billing.bal
@@ -373,7 +375,7 @@ def submit_new_reading(request):
 
                     billing.save()
 
-                    # 🔥 LOG BILL UPDATE
+                    # LOG BILL UPDATE
                     create_log(
                         user_name, role, "UPDATE", "billings", billing.id,
                         f"{role} updated billing for {reading.name}"
