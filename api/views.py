@@ -346,23 +346,47 @@ def submit_new_reading(request):
                 if units_used == 0:
                     bill = 300
 
-                billing, created = Billings.objects.get_or_create(
-                    user_id=user_id,
-                    defaults={
-                        "name": reading.name,
-                        "phone": reading.phone,
-                        "billed_on": date.today(),
-                        "units_used": units_used,
-                        "rate": reading.rate,
-                        "bill": bill,
-                        "paid": 0,
-                        "bal": bill  + billing.b_cd,
-                        "status": "Unpaid",
-                        #"b_cd" : 0,
-                        "prev_user" : prev_user,
-                        "cur_user" : new_cur_user
-                    }
-                )
+                try:
+                    billing = Billings.objects.get(user_id=user_id)
+
+                    # EXISTING RECORD
+                    previous_balance = billing.bal or 0
+
+                    billing.units_used = units_used
+                    billing.bill = bill
+
+                    # carry forward previous balance
+                    billing.b_cd = previous_balance
+                    billing.paid = 0
+                    billing.bal = bill + previous_balance
+                    billing.status = "Unpaid"
+
+                    billing.prev_user = prev_user
+                    billing.cur_user = new_cur_user
+
+                    billing.save()
+
+                    created = False
+
+                except Billings.DoesNotExist:
+                    # NEW RECORD
+                    billing = Billings.objects.create(
+                        user_id=user_id,
+                        name=reading.name,
+                        phone=reading.phone,
+                        billed_on=date.today(),
+                        units_used=units_used,
+                        rate=reading.rate,
+                        bill=bill,
+                        paid=0,
+                        b_cd=0,
+                        bal=bill,
+                        status="Unpaid",
+                        prev_user=prev_user,
+                        cur_user=new_cur_user
+                    )
+
+                    created = True
 
                 if not created:
                     billing.units_used = units_used
