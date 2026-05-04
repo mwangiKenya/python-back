@@ -60,7 +60,7 @@ class Billings(models.Model):
     bal = models.FloatField()
     status = models.CharField(max_length=100)
     b_cd = models.FloatField()
-    prev_user = models.ImageField()
+    prev_user = models.IntegerField()
     cur_user = models.IntegerField()
 
     class Meta:
