@@ -61,7 +61,7 @@ class Billings(models.Model):
     status = models.CharField(max_length=100)
     b_cd = models.FloatField()
     prev_user = models.ImageField()
-    cur_sup = models.IntegerField()
+    cur_user = models.IntegerField()
 
     class Meta:
         db_table = 'billings'
