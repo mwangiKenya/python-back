@@ -414,7 +414,7 @@ def update_paid(request):
                     new_paid = Decimal(str(item.get("paid", 0)))
 
                     billing.paid = new_paid
-                    billing.bal = billing.bill - new_paid
+                    billing.bal = billing.bal - new_paid
 
                     if new_paid == 0:
                         billing.status = "Unpaid"
