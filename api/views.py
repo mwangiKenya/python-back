@@ -103,7 +103,9 @@ def bill(request):
             'paid': b.paid,
             'bal': b.bal,
             'status': b.status,
-            'b_cd' : b.b_cd
+            'b_cd' : b.b_cd,
+            'prev_user' : b.prev_user,
+            'cur_user' : b.cur_user
         })
 
     return JsonResponse(data, safe=False)
