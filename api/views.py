@@ -350,15 +350,15 @@ def submit_new_reading(request):
                     billing = Billings.objects.get(user_id=user_id)
 
                     # EXISTING RECORD
-                    previous_balance = billing.bal or 0
+                    #previous_balance = billing.bal or 0
 
                     billing.units_used = units_used
                     billing.bill = bill
 
                     # carry forward previous balance
-                    billing.b_cd = previous_balance
+                    #billing.b_cd = previous_balance
                     billing.paid = 0
-                    billing.bal = bill + previous_balance
+                    billing.bal = bill
                     billing.status = "Unpaid"
 
                     billing.prev_user = prev_user
