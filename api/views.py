@@ -363,7 +363,16 @@ def submit_new_reading(request):
                     billing.prev_user = prev_user
                     billing.cur_user = new_cur_user
 
-                    billing.save()
+                    billing.save(update_fields=[
+                        "units_used",
+                        "bill",
+                        "paid",
+                        "b_cd",
+                        "bal",
+                        "status",
+                        "prev_user",
+                        "cur_user"
+                    ])
 
                 except Billings.DoesNotExist:
                     billing = Billings.objects.create(
@@ -427,7 +436,16 @@ def update_paid(request):
                     else:
                         billing.status = "Paid"
 
-                    billing.save()
+                    billing.save(update_fields=[
+                            "units_used",
+                            "bill",
+                            "paid",
+                            "b_cd",
+                            "bal",
+                            "status",
+                            "prev_user",
+                            "cur_user"
+                        ])
 
                     create_log(
                         item.get("username", "system"),
