@@ -1113,3 +1113,48 @@ def upload_billings_excel(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+#==============================================================
+#RRESET THE MID-MONTH READINGS
+@csrf_exempt
+def reset_mid_month_readings(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+
+        username = data.get("username", "system")
+        role = data.get("role", "system")
+
+        with transaction.atomic():
+
+            readings_qs = readings.objects.all()
+
+            for r in readings_qs:
+                old_mid_user = r.mid_user
+                old_mid_sup = r.mid_sup
+
+                r.mid_user = 0
+                r.mid_sup = 0
+                r.save()
+
+                # LOG CHANGES
+                create_log(
+                    username=username,
+                    role=role,
+                    action="UPDATE",
+                    table="readings",
+                    record_id=r.id,
+                    field_changed="mid_month_reset",
+                    old_val=f"user:{old_mid_user}, sup:{old_mid_sup}",
+                    new_val="user:0, sup:0",
+                    description=f"Mid-month readings reset for {r.name}"
+                )
+
+        return JsonResponse({
+            "message": "Mid-month readings reset successfully"
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
