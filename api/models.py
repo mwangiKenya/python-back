@@ -62,6 +62,7 @@ class Billings(models.Model):
     b_cd = models.FloatField()
     prev_user = models.IntegerField()
     cur_user = models.IntegerField()
+    total = models.FloatField()
 
     class Meta:
         db_table = 'billings'

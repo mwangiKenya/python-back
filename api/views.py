@@ -105,7 +105,8 @@ def bill(request):
             'status': b.status,
             'b_cd' : b.b_cd,
             'prev_user' : b.prev_user,
-            'cur_user' : b.cur_user
+            'cur_user' : b.cur_user,
+            'total' : b.total
         })
 
     return JsonResponse(data, safe=False)
