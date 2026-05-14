@@ -358,43 +358,66 @@ def finalize_month(request):
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     try:
+        today = datetime.now()
+
+        # ==========================
+        # STEP 1: CHECK IF CYCLE ENDED
+        # ==========================
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        cycle_end = datetime(today.year, today.month, last_day, 23, 59, 59)
+
+        if today < cycle_end:
+            return JsonResponse({
+                "error": "Cycle not finished yet"
+            }, status=400)
+
+        # ==========================
+        # STEP 2: CALCULATE NEXT CYCLE DATE
+        # ==========================
+        next_month = today.month + 1
+        next_year = today.year
+
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+
+        next_last_day = calendar.monthrange(next_year, next_month)[1]
+        next_cycle_date = date(next_year, next_month, next_last_day)
+
+        # ==========================
+        # STEP 3: SHIFT DATA SAFELY
+        # ==========================
         with transaction.atomic():
-
-            today = date.today()
-
-            next_month = today.month + 1
-            next_year = today.year
-
-            if next_month > 12:
-                next_month = 1
-                next_year += 1
-
-            last_day = calendar.monthrange(next_year, next_month)[1]
-            next_cycle_date = date(next_year, next_month, last_day)
-
             for r in readings.objects.all():
 
-                # SHIFT readings ONLY
-                r.prev_user = r.cur_user or r.prev_user
-                r.prev_sup = r.cur_sup or r.prev_sup
+                # SHIFT previous readings ONLY if current exists
+                if r.cur_user is not None:
+                    r.prev_user = r.cur_user
+                if r.cur_sup is not None:
+                    r.prev_sup = r.cur_sup
 
+                # RESET CURRENT
                 r.cur_user = None
                 r.cur_sup = None
 
+                # RESET MID MONTH
                 r.mid_user = 0
                 r.mid_sup = 0
 
-                # SHIFT DATES PROPERLY
+                # SHIFT DATES
                 r.prev_date = r.cur_date or r.prev_date
                 r.cur_date = next_cycle_date
 
                 r.save()
 
-        return JsonResponse({"message": "Cycle shifted successfully"})
+        return JsonResponse({
+            "message": "Cycle shifted successfully",
+            "next_cycle_date": str(next_cycle_date)
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
+    
 def billing_timer(request):
     today = datetime.now()
 
