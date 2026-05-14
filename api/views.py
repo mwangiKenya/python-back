@@ -369,14 +369,15 @@ def submit_new_reading(request):
 
                 if cur_user is not None:
                     cur_user = int(cur_user)
-                    reading.units_used = max(0, cur_user - reading.prev_user)
 
-                    reading.prev_user = cur_user
-                    reading.cur_user = None
+                    # calculate usage WITHOUT shifting prev_user
+                    reading.units_used = max(0, cur_user - (reading.prev_user or 0))
+
+                    # keep current reading stored
+                    reading.cur_user = cur_user
 
                 if cur_sup is not None:
-                    reading.prev_sup = int(cur_sup)
-                    reading.cur_sup = None
+                   reading.cur_sup = int(cur_sup)
 
                 reading.mid_user = item.get("mid_user", reading.mid_user)
                 reading.mid_sup = item.get("mid_sup", reading.mid_sup)
