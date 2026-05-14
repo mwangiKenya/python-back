@@ -20,6 +20,13 @@ from django.http import JsonResponse
 from datetime import date, datetime
 from .models import read_users, readings, Billings, Logs
 
+BILLING_STATE = {
+    "start_month": None,   # e.g. "2026-05"
+}
+CYCLE_CONFIG = {
+    "start_date": None,
+    "delay_days": 30,
+}
 
 
 def last_day_of_month(year, month):
@@ -71,6 +78,54 @@ import copy
 def snapshot_readings():
     global LAST_STATE_SNAPSHOT
     LAST_STATE_SNAPSHOT = list(readings.objects.values())
+
+#SELECT THE BILLING MONTH TO START
+@csrf_exempt
+def start_billing_month(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+        start_month = data.get("start_month")  # format: "2026-05"
+
+        if not start_month:
+            return JsonResponse({"error": "start_month required"}, status=400)
+
+        year, month = map(int, start_month.split("-"))
+
+        # last day of selected month
+        last_day = calendar.monthrange(year, month)[1]
+        prev_date = date(year, month, last_day)
+
+        # next month end date
+        next_month = month + 1
+        next_year = year
+
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+
+        next_last_day = calendar.monthrange(next_year, next_month)[1]
+        cur_date = date(next_year, next_month, next_last_day)
+
+        with transaction.atomic():
+            # update ALL readings
+            readings.objects.all().update(
+                prev_date=prev_date,
+                cur_date=cur_date
+            )
+
+        BILLING_STATE["start_month"] = start_month
+
+        return JsonResponse({
+            "message": "Billing month started",
+            "prev_date": str(prev_date),
+            "cur_date": str(cur_date)
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 # ============================================================
 # FETCH ALL WATER USERS
 # ============================================================
