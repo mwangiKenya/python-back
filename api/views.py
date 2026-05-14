@@ -352,25 +352,48 @@ def submit_new_reading(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+@csrf_exempt
 def finalize_month(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
 
-    with transaction.atomic():
-        for r in readings.objects.all():
+    try:
+        with transaction.atomic():
 
-            r.prev_user = r.cur_user or r.prev_user
-            r.prev_sup = r.cur_sup or r.prev_sup
+            today = date.today()
 
-            r.cur_user = None
-            r.cur_sup = None
+            next_month = today.month + 1
+            next_year = today.year
 
-            r.prev_date = r.cur_date
-            r.cur_date = date.today()
+            if next_month > 12:
+                next_month = 1
+                next_year += 1
 
-            r.save()
+            last_day = calendar.monthrange(next_year, next_month)[1]
+            next_cycle_date = date(next_year, next_month, last_day)
 
-    return JsonResponse({"message": "Cycle shifted"})
+            for r in readings.objects.all():
+
+                # SHIFT readings ONLY
+                r.prev_user = r.cur_user or r.prev_user
+                r.prev_sup = r.cur_sup or r.prev_sup
+
+                r.cur_user = None
+                r.cur_sup = None
+
+                r.mid_user = 0
+                r.mid_sup = 0
+
+                # SHIFT DATES PROPERLY
+                r.prev_date = r.cur_date or r.prev_date
+                r.cur_date = next_cycle_date
+
+                r.save()
+
+        return JsonResponse({"message": "Cycle shifted successfully"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 def billing_timer(request):
     today = datetime.now()
