@@ -20,6 +20,10 @@ from django.http import JsonResponse
 from datetime import date, datetime
 from .models import read_users, readings, Billings, Logs
 
+CYCLE_SCHEDULER = {
+    "end_time": None
+}
+
 BILLING_STATE = {
     "start_month": None,   # e.g. "2026-05"
 }
@@ -44,6 +48,116 @@ BILLING_CYCLE = {
     "start_year": 2026,
     "shift_days": 0     # optional delay before shift
 }
+
+from datetime import datetime, timedelta
+from django.utils import timezone
+
+CYCLE_SCHEDULER = {
+    "end_time": None
+}
+
+@csrf_exempt
+def set_cycle_duration(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    try:
+        data = json.loads(request.body)
+
+        days = int(data.get("days", 0))
+        hours = int(data.get("hours", 0))
+        minutes = int(data.get("minutes", 0))
+        seconds = int(data.get("seconds", 0))
+
+        delta = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+
+        end_time = timezone.now() + delta
+        CYCLE_SCHEDULER["end_time"] = end_time
+
+        return JsonResponse({
+            "message": "Cycle timer started",
+            "end_time": end_time.isoformat()
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
+def cycle_timer_status(request):
+    now = timezone.now()
+
+    if not CYCLE_SCHEDULER["end_time"]:
+        return JsonResponse({
+            "running": False,
+            "days": 0,
+            "hours": 0,
+            "minutes": 0,
+            "seconds": 0
+        })
+
+    diff = CYCLE_SCHEDULER["end_time"] - now
+
+    if diff.total_seconds() <= 0:
+        return JsonResponse({
+            "running": False,
+            "expired": True
+        })
+
+    return JsonResponse({
+        "running": True,
+        "days": diff.days,
+        "hours": diff.seconds // 3600,
+        "minutes": (diff.seconds % 3600) // 60,
+        "seconds": diff.seconds % 60
+    })
+
+@csrf_exempt
+def auto_shift_if_due(request):
+    """
+    This is called repeatedly by frontend OR cron.
+    If timer is 0 → shift readings automatically.
+    """
+
+    now = timezone.now()
+
+    if not CYCLE_SCHEDULER["end_time"]:
+        return JsonResponse({"message": "No cycle running"})
+
+    if now < CYCLE_SCHEDULER["end_time"]:
+        return JsonResponse({"message": "Not yet time"})
+
+    # RESET TIMER
+    CYCLE_SCHEDULER["end_time"] = None
+
+    # SHIFT LOGIC (NO BILLING CALCULATION)
+    with transaction.atomic():
+        next_month = now.month + 1
+        next_year = now.year
+
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+
+        next_last_day = calendar.monthrange(next_year, next_month)[1]
+        next_cycle_date = date(next_year, next_month, next_last_day)
+
+        for r in readings.objects.all():
+
+            r.prev_user = r.cur_user if r.cur_user is not None else r.prev_user
+            r.prev_sup = r.cur_sup if r.cur_sup is not None else r.prev_sup
+
+            r.prev_date = r.cur_date or r.prev_date
+            r.cur_date = next_cycle_date
+
+            r.cur_user = None
+            r.cur_sup = None
+
+            # IMPORTANT: DO NOT TOUCH billing
+            r.save()
+
+    return JsonResponse({
+        "message": "Auto shift completed",
+        "next_cycle_date": str(next_cycle_date)
+    })
 
 # TEMP SNAPSHOT FOR RESTORE (NEW FEATURE)
 LAST_STATE_SNAPSHOT = None
