@@ -12,7 +12,34 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .sms import send_sms
+import calendar
+from datetime import datetime, date, timedelta
+import pandas as pd
+from django.db import transaction
+from django.http import JsonResponse
+from datetime import date, datetime
+from .models import read_users, readings, Billings, Logs
 
+
+
+def last_day_of_month(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, last_day)
+
+
+
+# ============================
+# BILLING CYCLE CONFIG (NEW)
+# ============================
+
+BILLING_CYCLE = {
+    "start_month": 5,   # May default
+    "start_year": 2026,
+    "shift_days": 0     # optional delay before shift
+}
+
+# TEMP SNAPSHOT FOR RESTORE (NEW FEATURE)
+LAST_STATE_SNAPSHOT = None
 # ============================================================
 # HELPER FUNCTION → CREATE LOG (Avoid repeating code everywhere)
 # ============================================================
@@ -39,6 +66,11 @@ def create_hist(name, field, old_val, new_val):
         new_val=new_val
     )
 
+import copy
+
+def snapshot_readings():
+    global LAST_STATE_SNAPSHOT
+    LAST_STATE_SNAPSHOT = list(readings.objects.values())
 # ============================================================
 # FETCH ALL WATER USERS
 # ============================================================
@@ -273,124 +305,93 @@ def submit_new_reading(request):
         updates = data if isinstance(data, list) else [data]
 
         with transaction.atomic():
-
             for item in updates:
-                user_id = item.get("user_id")
-                cur_user = item.get("cur_user")
-                #new_cur_user = int(cur_user) if cur_user not in [None, ""] else None
-                #new_cur_sup = int(item.get("cur_sup", 0))
+
+                reading = readings.objects.select_for_update().get(user_id=item["user_id"])
+
                 cur_user = item.get("cur_user")
                 cur_sup = item.get("cur_sup")
 
-                new_cur_user = int(cur_user) if cur_user not in [None, ""] else None
-                new_cur_sup = int(cur_sup) if cur_sup not in [None, ""] else None
+                if cur_user is not None:
+                    cur_user = int(cur_user)
+                    reading.units_used = max(0, cur_user - reading.prev_user)
 
-                user_name = item.get("username")
-                role = item.get("role")
+                    reading.prev_user = cur_user
+                    reading.cur_user = None
 
-                reading = readings.objects.get(user_id=user_id)
-                mid_user = item.get("mid_user")
-                mid_sup = item.get("mid_sup")
+                if cur_sup is not None:
+                    reading.prev_sup = int(cur_sup)
+                    reading.cur_sup = None
 
-                if mid_user is not None:
-                    reading.mid_user = int(mid_user)
+                reading.mid_user = item.get("mid_user", reading.mid_user)
+                reading.mid_sup = item.get("mid_sup", reading.mid_sup)
 
-                if mid_sup is not None:
-                    reading.mid_sup = int(mid_sup)
-
-                prev_user = reading.prev_user
-                prev_sup = reading.prev_sup
-
-                #GET THE VALUES TO INSERT INTO HISTORY TABLE
-                name = reading.name
-
-                # 🔥 LOG CHANGES
-                if new_cur_user != 0:
-                    create_log(
-                        user_name, role, "UPDATE", "readings", reading.id,
-                        f"{role} updated user reading from {prev_user} to {new_cur_user}",
-                        "cur_user", prev_user, new_cur_user
-                    )
-                    create_hist(
-                        name, "user reading", prev_user, new_cur_user
-                    )
-
-                if new_cur_sup != 0:
-                    create_log(
-                        user_name, role, "UPDATE", "readings", reading.id,
-                        f"{role} updated sup reading from {prev_sup} to {new_cur_sup}",
-                        "cur_sup", prev_sup, new_cur_sup
-                    )
-                    create_hist(
-                        name, "sup reading", prev_sup, new_cur_sup
-                    )
-
-                # CALCULATIONS
-                #units_used = new_cur_user - prev_user
-                if new_cur_user is not None:
-                    units_used = new_cur_user - prev_user
-                else:
-                    units_used = reading.units_used or 0
-
-                if new_cur_user is not None:
-                    reading.prev_user = new_cur_user
-
-                if new_cur_sup is not None:
-                    reading.prev_sup = new_cur_sup
-                reading.cur_user = None
-                reading.cur_sup = None
-                reading.units_used = units_used
-                reading.cur_date = date.today()
                 reading.save()
 
                 # BILLING
-                bill = units_used * reading.rate
-                if units_used == 0:
-                    bill = 300
+                bill_amount = reading.units_used * reading.rate
+                if reading.units_used == 0:
+                    bill_amount = 300
 
-                try:
-                    billing = Billings.objects.get(user_id=user_id)
+                billing, _ = Billings.objects.update_or_create(
+                    user_id=reading.user_id,
+                    defaults={
+                        "name": reading.name,
+                        "phone": reading.phone,
+                        "units_used": reading.units_used,
+                        "rate": reading.rate,
+                        "bill": bill_amount,
+                        "bal": bill_amount,
+                        "paid": 0,
+                        "status": "Unpaid"
+                    }
+                )
 
-                    previous_balance = billing.bal or 0
-
-                    billing.units_used = units_used
-                    billing.bill = bill
-                    billing.paid = 0
-                    billing.b_cd = previous_balance
-                    billing.bal = bill + previous_balance
-                    billing.status = "Unpaid"
-                    billing.prev_user = prev_user
-                    billing.cur_user = new_cur_user
-
-                    billing.save()
-
-                except Billings.DoesNotExist:
-                    billing = Billings.objects.create(
-                        user_id=user_id,
-                        name=reading.name,
-                        phone=reading.phone,
-                        billed_on=date.today(),
-                        units_used=units_used,
-                        rate=reading.rate,
-                        bill=bill,
-                        paid=0,
-                        b_cd=0,
-                        bal=bill,
-                        status="Unpaid",
-                        prev_user=prev_user,
-                        cur_user=new_cur_user
-                    )
-
-                    # LOG BILL UPDATE
-                    create_log(
-                        user_name, role, "UPDATE", "billings", billing.id,
-                        f"{role} updated billing for {reading.name}"
-                    )
         return JsonResponse({"message": "Saved successfully"})
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+def finalize_month(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    with transaction.atomic():
+        for r in readings.objects.all():
+
+            r.prev_user = r.cur_user or r.prev_user
+            r.prev_sup = r.cur_sup or r.prev_sup
+
+            r.cur_user = None
+            r.cur_sup = None
+
+            r.prev_date = r.cur_date
+            r.cur_date = date.today()
+
+            r.save()
+
+    return JsonResponse({"message": "Cycle shifted"})
+
+def billing_timer(request):
+    today = datetime.now()
+
+    next_month = today.month + 1
+    next_year = today.year
+
+    if next_month > 12:
+        next_month = 1
+        next_year += 1
+
+    end_date = datetime(next_year, next_month, calendar.monthrange(next_year, next_month)[1], 23, 59, 59)
+
+    diff = end_date - today
+
+    return JsonResponse({
+        "days": diff.days,
+        "hours": diff.seconds // 3600,
+        "minutes": (diff.seconds % 3600) // 60,
+        "seconds": diff.seconds % 60
+    })
 # ============================================================
 # UPDATE PAYMENT
 # ============================================================
@@ -1157,3 +1158,23 @@ def reset_mid_month_readings(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+@csrf_exempt
+def restore_readings(request):
+    global LAST_STATE_SNAPSHOT
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    if not LAST_STATE_SNAPSHOT:
+        return JsonResponse({"error": "No snapshot available"}, status=400)
+
+    with transaction.atomic():
+        readings.objects.all().delete()
+
+        for r in LAST_STATE_SNAPSHOT:
+            r.pop("id", None)
+            readings.objects.create(**r)
+
+    return JsonResponse({"message": "System restored successfully"})

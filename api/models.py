@@ -19,17 +19,18 @@ class readings(models.Model):
     user = models.ForeignKey(read_users, on_delete=models.CASCADE, db_column='user_id')
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=50)
-    prev_user = models.IntegerField()
-    prev_sup = models.IntegerField()
+    prev_user = models.IntegerField(null=True)
+    prev_sup = models.IntegerField(null=True)
     prev_date = models.DateField()
     cur_user = models.IntegerField(null=True, blank=True)
     cur_sup = models.IntegerField(null=True, blank=True)
     cur_date = models.DateField()
-    units_used = models.IntegerField()
-    rate = models.IntegerField()
-    metre_num = models.IntegerField()
+    units_used = models.IntegerField(null=True)
+    rate = models.IntegerField(null=True)
+    metre_num = models.IntegerField(null=True)
     mid_user = models.IntegerField(null=True, blank=True)
     mid_sup = models.IntegerField(null=True, blank=True)
+    cycle_locked_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'readings'
