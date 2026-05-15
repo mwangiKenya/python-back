@@ -503,6 +503,19 @@ def submit_new_reading(request):
                 if reading.units_used == 0:
                     bill_amount = 300
 
+                # GET OLD BILLING IF EXISTS
+                old_billing = Billings.objects.filter(user_id=reading.user_id).first()
+
+                previous_balance = Decimal("0")
+                previous_paid = Decimal("0")
+
+                if old_billing:
+                    previous_balance = old_billing.bal or Decimal("0")
+                    previous_paid = old_billing.paid or Decimal("0")
+
+                # CURRENT TOTAL DUE
+                total_balance = previous_balance + Decimal(str(bill_amount))
+
                 billing, _ = Billings.objects.update_or_create(
                     user_id=reading.user_id,
                     defaults={
@@ -510,9 +523,19 @@ def submit_new_reading(request):
                         "phone": reading.phone,
                         "units_used": reading.units_used,
                         "rate": reading.rate,
+
+                        # CURRENT MONTH BILL
                         "bill": bill_amount,
-                        "bal": bill_amount,
-                        "paid": 0,
+
+                        # KEEP OLD BALANCE
+                        "b_cd": previous_balance,
+
+                        # TOTAL BALANCE
+                        "bal": total_balance,
+
+                        # RESET PAID FOR NEW BILL
+                        "paid": previous_paid,
+
                         "status": "Unpaid"
                     }
                 )
