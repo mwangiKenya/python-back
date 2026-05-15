@@ -534,7 +534,7 @@ def submit_new_reading(request):
                         "bal": total_balance,
 
                         # RESET PAID FOR NEW BILL
-                        "paid": previous_paid,
+                        "paid": 0,
 
                         "status": "Unpaid"
                     }
