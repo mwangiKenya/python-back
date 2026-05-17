@@ -772,7 +772,7 @@ def update_paid(request):
 # ANALYTICS (UNCHANGED)
 # ============================================================
 def total_bill(request):
-    total = Billings.objects.aggregate(total_bill=Sum('bill'))['total_bill'] or 0
+    total = Billings.objects.aggregate(total_bill=Sum('paid'))['total_bill'] or 0
     return JsonResponse({"total_bill": round(float(total), 2)})
 
 def total_paid(request):
