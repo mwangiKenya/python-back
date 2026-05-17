@@ -1022,19 +1022,21 @@ def process_reading_update(
                    "cur_sup", prev_sup, new_cur_sup)
 
     # =========================
-    # UPDATE READING
-    # =========================
-    if new_cur_user is not None:
-        reading.prev_user = new_cur_user
+        # UPDATE READING
+        # =========================
 
-    if new_cur_sup is not None:
-        reading.prev_sup = new_cur_sup
+        if new_cur_user is not None:
+            reading.cur_user = new_cur_user
 
-    reading.units_used = units_used
-    reading.cur_user = None
-    reading.cur_sup = None
-    reading.cur_date = date.today()
-    reading.save()
+        if new_cur_sup is not None:
+            reading.cur_sup = new_cur_sup
+
+        reading.units_used = units_used
+
+        # DO NOT SHIFT PREVIOUS VALUES
+        # WAIT FOR TIMER / FINALIZE
+
+        reading.save()
 
     # =========================
     # BILLING
