@@ -20,6 +20,37 @@ from django.http import JsonResponse
 from datetime import date, datetime
 from .models import read_users, readings, Billings, Logs
 
+def update_reading_field(reading, field_name, new_value, username="system", role="system"):
+    """
+    Safely updates a field AND logs history automatically
+    """
+
+    old_value = getattr(reading, field_name)
+
+    # only log if something actually changes
+    if old_value != new_value:
+        history.objects.create(
+            name=reading.name,
+            field=field_name,
+            old_val=old_value if old_value is not None else 0,
+            new_val=new_value if new_value is not None else 0
+        )
+
+        create_log(
+            username=username,
+            role=role,
+            action="UPDATE",
+            table="readings",
+            record_id=reading.id,
+            field_changed=field_name,
+            old_val=old_value,
+            new_val=new_value,
+            description=f"{field_name} updated for {reading.name}"
+        )
+
+    setattr(reading, field_name, new_value)
+
+
 CYCLE_SCHEDULER = {
     "end_time": None
 }
@@ -473,6 +504,9 @@ def submit_new_reading(request):
         data = json.loads(request.body)
         updates = data if isinstance(data, list) else [data]
 
+        user_name = data.get("username", "system")
+        role = data.get("role", "system")
+
         with transaction.atomic():
             for item in updates:
 
@@ -488,10 +522,12 @@ def submit_new_reading(request):
                     reading.units_used = max(0, cur_user - (reading.prev_user or 0))
 
                     # keep current reading stored
-                    reading.cur_user = cur_user
+                    #reading.cur_user = cur_user
+                    update_reading_field(reading, "cur_user", cur_user, user_name, role)
 
                 if cur_sup is not None:
-                   reading.cur_sup = int(cur_sup)
+                   #reading.cur_sup = int(cur_sup)
+                   update_reading_field(reading, "cur_sup", cur_sup, user_name, role)
 
                 reading.mid_user = item.get("mid_user", reading.mid_user)
                 reading.mid_sup = item.get("mid_sup", reading.mid_sup)
@@ -977,13 +1013,15 @@ def process_reading_update(
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"mid_user {reading.mid_user} → {mid_user}",
                    "mid_user", reading.mid_user, mid_user)
-        reading.mid_user = mid_user
+        #reading.mid_user = mid_user
+        update_reading_field(reading, "mid_user", mid_user, username, role)
 
     if mid_sup is not None:
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"mid_sup {reading.mid_sup} → {mid_sup}",
                    "mid_sup", reading.mid_sup, mid_sup)
-        reading.mid_sup = mid_sup
+        #reading.mid_sup = mid_sup
+        update_reading_field(reading, "mid_sup", mid_sup, username, role)
 
     # =========================
     # IF NO CURRENT READING
@@ -1026,10 +1064,12 @@ def process_reading_update(
         # =========================
 
         if new_cur_user is not None:
-            reading.cur_user = new_cur_user
+            #reading.cur_user = new_cur_user
+            update_reading_field(reading, "cur_user", new_cur_user, username, role)
 
         if new_cur_sup is not None:
-            reading.cur_sup = new_cur_sup
+            #reading.cur_sup = new_cur_sup
+            update_reading_field(reading, "cur_sup", new_cur_sup, username, role)
 
         reading.units_used = units_used
 
