@@ -32,7 +32,7 @@ def update_reading_field(reading, field_name, new_value, username="system", role
         history.objects.create(
             name=reading.name,
             field=field_name,
-            old_val=old_value if old_value is not None else 0,
+            old_val=reading.old_value if old_value is not None else 0,
             new_val=new_value if new_value is not None else 0
         )
 
