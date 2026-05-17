@@ -516,36 +516,66 @@ def submit_new_reading(request):
                 # CURRENT TOTAL DUE
                 total_balance = previous_balance + Decimal(str(bill_amount))
 
-                billing, _ = Billings.objects.update_or_create(
-                    user_id=reading.user_id,
-                    defaults={
-                        "name": reading.name,
-                        "phone": reading.phone,
-                        "units_used": reading.units_used,
-                        "rate": reading.rate,
+                billing = Billings.objects.filter(user_id=reading.user_id).first()
+
+                if billing:
+
+                        billing.name = reading.name
+                        billing.phone = reading.phone
+                        billing.units_used = reading.units_used
+                        billing.rate = reading.rate
 
                         # CURRENT MONTH BILL
-                        "bill": bill_amount,
+                        billing.bill = bill_amount
 
-                        # KEEP OLD BALANCE
-                        "b_cd": previous_balance,
+                        # PREVIOUS BALANCE
+                        billing.b_cd = previous_balance
 
                         # TOTAL BALANCE
-                        "bal": total_balance,
+                        billing.bal = total_balance
 
-                        # RESET PAID FOR NEW BILL
-                        "paid": 0,
+                        # RESET PAID
+                        billing.paid = 0
 
-                        "status": "Unpaid",
-                        "prev_user" : reading.prev_user,
-                        "cur_sup" : reading.cur_user
-                    }
-                )
+                        billing.status = "Unpaid"
+                        billing.prev_user = reading.prev_user
+                        billing.cur_user = reading.cur_user
 
-        return JsonResponse({"message": "Saved successfully"})
+                        billing.save(update_fields=[
+                            "name",
+                            "phone",
+                            "units_used",
+                            "rate",
+                            "bill",
+                            "b_cd",
+                            "bal",
+                            "paid",
+                            "status",
+                            "prev_user",
+                            "cur_user"
+                        ])
+
+                else:
+
+                        Billings.objects.create(
+                            user_id=reading.user_id,
+                            name=reading.name,
+                            phone=reading.phone,
+                            units_used=reading.units_used,
+                            rate=reading.rate,
+                            bill=bill_amount,
+                            b_cd=previous_balance,
+                            bal=total_balance,
+                            paid=0,
+                            status="Unpaid",
+                            prev_user=reading.prev_user,
+                            cur_user=reading.cur_user
+                        )
+
+            return JsonResponse({"message": "Saved successfully"})
 
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+                         return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def finalize_month(request):
