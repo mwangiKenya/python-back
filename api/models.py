@@ -64,12 +64,7 @@ class Billings(models.Model):
     b_cd = models.FloatField()
     prev_user = models.IntegerField()
     cur_user = models.IntegerField()
-    total = GeneratedField(
-        expression=F('bill') + F('b_cd'),
-        output_field=FloatField(),
-        db_persisted=True
-    )
-
+    
     class Meta:
         db_table = 'billings'
         managed = False
