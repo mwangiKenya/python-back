@@ -536,7 +536,9 @@ def submit_new_reading(request):
                         # RESET PAID FOR NEW BILL
                         "paid": 0,
 
-                        "status": "Unpaid"
+                        "status": "Unpaid",
+                        "prev_user" : reading.prev_user,
+                        "cur_sup" : reading.cur_user
                     }
                 )
 
