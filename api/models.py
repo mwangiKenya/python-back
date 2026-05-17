@@ -1,5 +1,6 @@
 from django.db import models
 from datetime import date
+from django.db.models import GeneratedField, F, ExpressionWrapper, FloatField
 
 class read_users(models.Model):
     id = models.AutoField(primary_key=True)  # ✅ FIX
@@ -63,7 +64,11 @@ class Billings(models.Model):
     b_cd = models.FloatField()
     prev_user = models.IntegerField()
     cur_user = models.IntegerField()
-    total = models.FloatField(editable=False, null=True)
+    total = GeneratedField(
+        expression=F('bill') + F('b_cd'),
+        output_field=FloatField(),
+        db_persisted=True
+    )
 
     class Meta:
         db_table = 'billings'
