@@ -693,7 +693,7 @@ def update_paid(request):
 
                     if new_paid == 0:
                         billing.status = "Unpaid"
-                    elif new_paid < billing.bill:
+                    elif new_paid < billing.bal:
                         billing.status = "Partially Paid"
                     else:
                         billing.status = "Paid"
