@@ -1067,23 +1067,23 @@ def process_reading_update(
                    "cur_sup", prev_sup, new_cur_sup)
 
     # =========================
-        # UPDATE READING
-        # =========================
+    # UPDATE READING
+    # =========================
 
-        if new_cur_user is not None:
+    if new_cur_user is not None:
             #reading.cur_user = new_cur_user
             update_reading_field(reading, "cur_user", new_cur_user, username, role)
 
-        if new_cur_sup is not None:
+    if new_cur_sup is not None:
             #reading.cur_sup = new_cur_sup
             update_reading_field(reading, "cur_sup", new_cur_sup, username, role)
 
-        reading.units_used = units_used
+    reading.units_used = units_used
 
         # DO NOT SHIFT PREVIOUS VALUES
         # WAIT FOR TIMER / FINALIZE
 
-        reading.save()
+    reading.save()
 
     # =========================
     # BILLING
