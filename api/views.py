@@ -555,7 +555,8 @@ def submit_new_reading(request):
                 # GET OLD BILLING IF EXISTS
                 old_billing = Billings.objects.filter(user_id=reading.user_id).first()
 
-                previous_balance = Decimal("0")
+                #previous_balance = Decimal("0")
+                previous_balance = old_billing.b_cd or Decimal("0")
                 previous_paid = Decimal("0")
 
                 if old_billing:
