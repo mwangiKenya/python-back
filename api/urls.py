@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data, send_sms_view, download_billings_template, upload_billings_excel, reset_mid_month_readings, billing_timer, finalize_month, restore_readings, start_billing_month, cycle_timer_status, set_cycle_duration, auto_shift_if_due
+from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data, send_sms_view, download_billings_template, upload_billings_excel, reset_mid_month_readings, billing_timer, finalize_month, restore_readings, start_billing_month, cycle_timer_status, set_cycle_duration, auto_shift_if_due, total_bal
 
 urlpatterns =[
     path('water_users/', water_users, name='water_users'), #fetch water users data
@@ -40,4 +40,5 @@ urlpatterns =[
     path("set_cycle_duration/", set_cycle_duration),
     path("cycle_timer_status/", cycle_timer_status),
     path("auto_shift_if_due/", auto_shift_if_due),
+    path("total_bal/", total_bal, name="total_bal"),
 ]
