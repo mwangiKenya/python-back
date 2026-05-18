@@ -825,7 +825,7 @@ def total_bill(request):
     return JsonResponse({"total_bill": round(float(total), 2)})
 
 def total_bal(request):
-    total = Billings.objects.aggregate(total_bill=Sum('b_cd'))['total_bal'] or 0
+    total = Billings.objects.aggregate(total_bal=Sum('b_cd'))['total_bal'] or 0
     return JsonResponse({"total_bal": round(float(total), 2)})
 
 def total_paid(request):
