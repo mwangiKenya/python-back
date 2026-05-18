@@ -32,7 +32,7 @@ def update_reading_field(reading, field_name, new_value, username="system", role
         history.objects.create(
             name=reading.name,
             field=field_name,
-            old_val=reading.old_value if old_value is not None else 0,
+            old_val=old_value if old_value is not None else 0,
             new_val=new_value if new_value is not None else 0
         )
 
@@ -504,9 +504,15 @@ def submit_new_reading(request):
         data = json.loads(request.body)
         updates = data if isinstance(data, list) else [data]
 
-        user_name = data.get("username", "system")
-        role = data.get("role", "system")
+        with transaction.atomic():
+            for item in updates:
 
+                user_name = item.get("username", "system")
+                role = item.get("role", "system")
+
+                reading = readings.objects.select_for_update().get(
+                    user_id=item["user_id"]
+                )
         with transaction.atomic():
             for item in updates:
 
