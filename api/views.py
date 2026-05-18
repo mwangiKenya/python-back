@@ -25,7 +25,8 @@ def update_reading_field(reading, field_name, new_value, username="system", role
     Safely updates a field AND logs history automatically
     """
 
-    old_value = getattr(reading, field_name)
+    #old_value = getattr(reading, field_name)
+    old_value = readings.objects.get(id=reading.id).__dict__.get(field_name)
 
     # only log if something actually changes
     if old_value != new_value:
