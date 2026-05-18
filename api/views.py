@@ -26,7 +26,13 @@ def update_reading_field(reading, field_name, new_value, username="system", role
     """
 
     #old_value = getattr(reading, field_name)
-    old_value = readings.objects.get(id=reading.id).__dict__.get(field_name)
+    #old_value = readings.objects.get(id=reading.id).__dict__.get(field_name)
+    old_value = (
+    readings.objects
+    .filter(id=reading.id)
+    .values_list(field_name, flat=True)
+    .first()
+    )
 
     # only log if something actually changes
     if old_value != new_value:
