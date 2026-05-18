@@ -560,7 +560,7 @@ def submit_new_reading(request):
                 previous_paid = Decimal("0")
 
                 if old_billing:
-                    previous_balance = old_billing.b_cd or Decimal("0")
+                    previous_balance = old_billing.bal or Decimal("0")
                     previous_paid = old_billing.paid or Decimal("0")
 
                 # CURRENT TOTAL DUE
