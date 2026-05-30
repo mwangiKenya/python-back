@@ -344,7 +344,8 @@ def bill(request):
             'status': b.status,
             'b_cd' : b.b_cd,
             'prev_user' : b.prev_user,
-            'cur_user' : b.cur_user
+            'cur_user' : b.cur_user,
+            'sms_name' : b.sms_name
         })
 
     return JsonResponse(data, safe=False)
