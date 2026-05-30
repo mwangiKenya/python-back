@@ -64,6 +64,7 @@ class Billings(models.Model):
     b_cd = models.FloatField()
     prev_user = models.IntegerField()
     cur_user = models.IntegerField()
+    sms_name = models.CharField(max_length=50)
     
     class Meta:
         db_table = 'billings'

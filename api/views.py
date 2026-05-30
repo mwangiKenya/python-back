@@ -590,6 +590,7 @@ def submit_new_reading(request):
                         billing.status = "Unpaid"
                         billing.prev_user = reading.prev_user
                         billing.cur_user = reading.cur_user
+                        billing.sms_name
 
                         billing.save(update_fields=[
                             "name",
@@ -602,7 +603,8 @@ def submit_new_reading(request):
                             "paid",
                             "status",
                             "prev_user",
-                            "cur_user"
+                            "cur_user",
+                            "sms_name"
                         ])
 
                 else:
@@ -619,7 +621,8 @@ def submit_new_reading(request):
                             paid=0,
                             status="Unpaid",
                             prev_user=reading.prev_user,
-                            cur_user=reading.cur_user
+                            cur_user=reading.cur_user,
+                            sms_name =reading.metre_num
                         )
 
             return JsonResponse({"message": "Saved successfully"})
