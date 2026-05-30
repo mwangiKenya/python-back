@@ -6,7 +6,7 @@ class read_users(models.Model):
     id = models.AutoField(primary_key=True)  # ✅ FIX
     fname = models.CharField(max_length=100)
     phone = models.CharField(max_length=100)
-    metre_num = models.IntegerField()
+    metre_num = models.CharField(max_length=40)
     zone = models.CharField(max_length=100)
     rate = models.IntegerField()
     created_on = models.DateField()
