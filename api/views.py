@@ -1287,7 +1287,8 @@ def update_user(request, user_id):
             Billings.objects.filter(user_id=user_id).update(
                 name=fname,
                 phone=phone,
-                rate=rate
+                rate=rate,
+                sms_name=metre_num
             )
 
             # ===============================
