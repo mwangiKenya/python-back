@@ -28,7 +28,7 @@ class readings(models.Model):
     cur_date = models.DateField()
     units_used = models.IntegerField(null=True)
     rate = models.IntegerField(null=True)
-    metre_num = models.IntegerField(null=True)
+    metre_num = models.CharField(max_length=40)
     mid_user = models.IntegerField(null=True, blank=True)
     mid_sup = models.IntegerField(null=True, blank=True)
     cycle_locked_until = models.DateTimeField(null=True, blank=True)
