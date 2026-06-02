@@ -75,7 +75,7 @@ class Billings(models.Model):
     parent = models.CharField(max_length=20)
     
     class Meta:
-        ordering = ["user_id"]
+        ordering = ["user"]
         db_table = 'billings'
         managed = False
 
