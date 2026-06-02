@@ -293,7 +293,9 @@ def water_users(request):
             'metre_num': u.metre_num,
             'zone': u.zone,
             'rate': u.rate,
-            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None
+            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None,
+            'grp' : u.grp,
+            'parent' : u.parent
         })
 
     return JsonResponse(data, safe=False)
@@ -398,7 +400,9 @@ def read_data(request):
             'cur_date' : r.cur_date.strftime('%Y-%m-%d') if r.cur_date else None,
             'rate': r.rate,
             'mid_user':r.mid_user,
-            'mid_sup': r.mid_sup
+            'mid_sup': r.mid_sup,
+            'grp': r.grp,
+            'parent': r.parent
         })
 
     return JsonResponse(data, safe=False)
@@ -454,6 +458,8 @@ def new_user(request):
         metre_num = data.get("metre_num")
         zone = data.get("zone")
         rate = data.get("rate")
+        grp = data.get("grp")
+        parent = data.get("parent")
 
         user_name = data.get("username")
         role = data.get("role")
@@ -467,7 +473,9 @@ def new_user(request):
                 phone=phone,
                 metre_num=metre_num,
                 zone=zone,
-                rate=rate
+                rate=rate,
+                grp = grp,
+                parent = parent
             )
 
             today = date.today()
@@ -484,7 +492,9 @@ def new_user(request):
                 cur_date=today,
                 units_used=0,
                 rate=rate,
-                metre_num=metre_num
+                metre_num=metre_num,
+                grp = grp,
+                parent=parent
             )
 
             # 🔥 LOG USER CREATION
@@ -594,6 +604,8 @@ def submit_new_reading(request):
                         billing.prev_user = reading.prev_user
                         billing.cur_user = reading.cur_user
                         billing.sms_name
+                        billing.grp
+                        billing.parent
 
                         billing.save(update_fields=[
                             "name",
@@ -607,7 +619,9 @@ def submit_new_reading(request):
                             "status",
                             "prev_user",
                             "cur_user",
-                            "sms_name"
+                            "sms_name",
+                            "grp",
+                            "parent"
                         ])
 
                 else:
@@ -625,7 +639,9 @@ def submit_new_reading(request):
                             status="Unpaid",
                             prev_user=reading.prev_user,
                             cur_user=reading.cur_user,
-                            sms_name =reading.metre_num
+                            sms_name =reading.metre_num,
+                            grp=reading.grp,
+                            parent=reading.parent
                         )
 
             return JsonResponse({"message": "Saved successfully"})
@@ -1250,6 +1266,8 @@ def update_user(request, user_id):
         metre_num = data.get("metre_num")
         zone = data.get("zone")
         rate = data.get("rate")
+        grp = data.get("grp")
+        parent = data.get("parent")
 
         user_name = data.get("username", "Unknown")
         role = data.get("role", "Unknown")
@@ -1272,6 +1290,8 @@ def update_user(request, user_id):
             user.metre_num = metre_num or user.metre_num
             user.zone = zone or user.zone
             user.rate = rate or user.rate
+            user.grp = grp or user.grp
+            user.parent = parent or user.parent
             user.save()
 
             # ===============================
@@ -1281,7 +1301,9 @@ def update_user(request, user_id):
                 name=fname,
                 phone=phone,
                 metre_num=metre_num,
-                rate=rate
+                rate=rate,
+                grp = grp,
+                parent = parent
             )
 
             # ===============================
@@ -1291,7 +1313,9 @@ def update_user(request, user_id):
                 name=fname,
                 phone=phone,
                 rate=rate,
-                sms_name=metre_num
+                sms_name=metre_num,
+                grp =grp,
+                parent = parent
             )
 
             # ===============================

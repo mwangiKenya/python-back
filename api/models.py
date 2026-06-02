@@ -10,6 +10,8 @@ class read_users(models.Model):
     zone = models.CharField(max_length=100)
     rate = models.IntegerField()
     created_on = models.DateField()
+    grp = models.CharField(max_length=20)
+    parent = models.CharField(max_length=20)
 
     class Meta:
         db_table = 'waterusers'
@@ -32,6 +34,8 @@ class readings(models.Model):
     mid_user = models.IntegerField(null=True, blank=True)
     mid_sup = models.IntegerField(null=True, blank=True)
     cycle_locked_until = models.DateTimeField(null=True, blank=True)
+    grp = models.CharField(max_length=20)
+    parent = models.CharField(max_length=20)
 
     class Meta:
         db_table = 'readings'
