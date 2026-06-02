@@ -1540,3 +1540,23 @@ def restore_readings(request):
             readings.objects.create(**r)
 
     return JsonResponse({"message": "System restored successfully"})
+
+
+
+
+def download_users_excel(request):
+    users = read_users.objects.all().values(
+        "id", "fname", "phone", "metre_num",
+        "zone", "rate", "grp", "parent", "created_on"
+    )
+
+    df = pd.DataFrame(list(users))
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="water_users.xlsx"'
+
+    df.to_excel(response, index=False)
+
+    return response
