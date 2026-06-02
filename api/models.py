@@ -14,6 +14,7 @@ class read_users(models.Model):
     parent = models.CharField(max_length=20)
 
     class Meta:
+        ordering = ["id"]
         db_table = 'waterusers'
         managed = False
 
@@ -38,6 +39,7 @@ class readings(models.Model):
     parent = models.CharField(max_length=20)
 
     class Meta:
+        ordering = ["user_id"]
         db_table = 'readings'
         managed = False
 
@@ -73,6 +75,7 @@ class Billings(models.Model):
     parent = models.CharField(max_length=20)
     
     class Meta:
+        ordering = ["user_id"]
         db_table = 'billings'
         managed = False
 
