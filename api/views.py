@@ -345,7 +345,9 @@ def bill(request):
             'b_cd' : b.b_cd,
             'prev_user' : b.prev_user,
             'cur_user' : b.cur_user,
-            'sms_name' : b.sms_name
+            'sms_name' : b.sms_name,
+            'grp' : b.grp,
+            'parent' : b.parent
         })
 
     return JsonResponse(data, safe=False)
