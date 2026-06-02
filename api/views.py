@@ -966,7 +966,7 @@ def delete_user(request, user_id):
             # ====================================================
             Billings.objects.filter(user_id=user_id).delete()
             Billings.objects.filter(name=user.fname).delete()
-            Billings.objects.filter(phone=user.phone).delete()
+            #Billings.objects.filter(phone=user.phone).delete()
 
             # ====================================================
             # 3. DELETE USER
