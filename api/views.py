@@ -1139,7 +1139,13 @@ def process_reading_update(
                 "bill": bill_amount,
                 "paid": 0,
                 "bal": bill_amount,
-                "status": "Unpaid"
+                "status": "Unpaid",
+                "b_cd": 0,
+                "prev_user": reading.prev_user,
+                "cur_user": reading.cur_user,
+                "sms_name": reading.metre_num,
+                "grp": reading.grp,
+                "parent": reading.parent
             }
         )
 
