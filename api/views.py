@@ -1128,6 +1128,11 @@ def process_reading_update(
         if units_used == 0:
             bill_amount = 300
 
+        old_billing = Billings.objects.filter(user_id=user_id).first()
+        previous_balance = Decimal("0")
+        if old_billing:
+            previous_balance = old_billing.bal or Decimal("0")
+
         billing, created = Billings.objects.get_or_create(
             user_id=user_id,
             billed_on=date.today(),
@@ -1140,7 +1145,7 @@ def process_reading_update(
                 "paid": 0,
                 "bal": bill_amount,
                 "status": "Unpaid",
-                "b_cd": billing.bal,
+                "b_cd": previous_balance,
                 "prev_user": reading.prev_user,
                 "cur_user": reading.cur_user,
                 "sms_name": reading.metre_num,
@@ -1150,9 +1155,12 @@ def process_reading_update(
         )
 
         if not created:
+            previous_balance = billing.bal or Decimal("0")
+
             billing.units_used = units_used
             billing.bill = bill_amount
-            billing.bal = bill_amount - billing.paid
+            billing.b_cd = previous_balance
+            billing.bal = previous_balance + Decimal(str(bill_amount)) - billing.paid
 
             if billing.paid == 0:
                 billing.status = "Unpaid"
