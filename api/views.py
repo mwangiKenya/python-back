@@ -1140,7 +1140,7 @@ def process_reading_update(
                 "paid": 0,
                 "bal": bill_amount,
                 "status": "Unpaid",
-                "b_cd": 0,
+                "b_cd": billing.bal,
                 "prev_user": reading.prev_user,
                 "cur_user": reading.cur_user,
                 "sms_name": reading.metre_num,
