@@ -1159,6 +1159,7 @@ def process_reading_update(
 
             billing.units_used = units_used
             billing.bill = bill_amount
+            billing.paid = 0
             billing.b_cd = previous_balance
             billing.bal = previous_balance + Decimal(str(bill_amount)) - billing.paid
 
