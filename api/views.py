@@ -1,4 +1,3 @@
-
 from django.http import JsonResponse, HttpResponse
 from .models import read_users, readings, Admin, Billings, Logs, Users, history
 from django.views.decorators.csrf import csrf_exempt
@@ -19,6 +18,12 @@ from django.db import transaction
 from django.http import JsonResponse
 from datetime import date, datetime
 from .models import read_users, readings, Billings, Logs
+from openpyxl import Workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils import get_column_letter
+from django.conf import settings
+from openpyxl import load_workbook
+import os
 
 def update_reading_field(reading, field_name, new_value, username="system", role="system"):
     """
@@ -1172,13 +1177,24 @@ def process_reading_update(
 
             billing.save()
 #DOWNLOAD A FORMATED EXCEL SHEET OF THE READINGS TABLE TO FILL AND UPLOAD
-from openpyxl import Workbook
-from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.utils import get_column_letter
-from django.http import HttpResponse
-
 
 def download_readings_template(request):
+
+    # ==========================================
+    # LOAD THE MASTER TEMPLATE
+    # ==========================================
+    template_path = os.path.join(
+        settings.BASE_DIR,
+        "templates",
+        "readings_template.xlsx"
+    )
+
+    wb = load_workbook(template_path)
+    ws = wb.active
+
+    # ==========================================
+    # GET CUSTOMER DATA
+    # ==========================================
     readings_data = readings.objects.all().values(
         "user_id",
         "name",
@@ -1188,113 +1204,54 @@ def download_readings_template(request):
         "prev_sup"
     )
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Readings"
+    # ==========================================
+    # WRITE CUSTOMER DATA
+    # ==========================================
+    row = 2
 
-    # ==========================
-    # HEADERS
-    # ==========================
-    headers = [
-        "user_id",
-        "name",
-        "phone",
-        "metre_num",
-        "prev_user",
-        "prev_sup",
-        "mid_user",
-        "mid_sup",
-        "cur_user",
-        "cur_sup",
-    ]
-
-    ws.append(headers)
-
-    # ==========================
-    # DATA
-    # ==========================
     for r in readings_data:
-        ws.append([
-            r["user_id"],
-            r["name"],
-            r["phone"],
-            r["metre_num"],
-            r["prev_user"],
-            r["prev_sup"],
-            "",
-            "",
-            "",
-            "",
-        ])
 
-    # ==========================================================
-    # DATA VALIDATION
-    # cur_user > prev_user AND NOT EMPTY
-    # cur_sup  > prev_sup  AND NOT EMPTY
-    # ==========================================================
+        # Customer information
+        ws[f"A{row}"] = r["user_id"]
+        ws[f"B{row}"] = r["name"]
+        ws[f"C{row}"] = r["phone"]
+        ws[f"D{row}"] = r["metre_num"]
+        ws[f"E{row}"] = r["prev_user"]
+        ws[f"F{row}"] = r["prev_sup"]
 
-    max_row = ws.max_row
+        # Clear input cells
+        ws[f"G{row}"] = None
+        ws[f"H{row}"] = None
+        ws[f"I{row}"] = None
+        ws[f"J{row}"] = None
 
-    for row in range(2, max_row + 1):
+        row += 1
 
-        # -----------------------------
-        # CUR USER (Column I)
-        # -----------------------------
-        dv_cur_user = DataValidation(
-            type="custom",
-            formula1=f'=AND(I{row}>E{row},I{row}<>"")',
-            allow_blank=False
-        )
-        dv_cur_user.errorTitle = "Invalid User Reading"
-        dv_cur_user.error = (
-            "Current User Reading must be greater than Previous User Reading "
-            "and cannot be empty."
-        )
-        dv_cur_user.promptTitle = "User Reading"
-        dv_cur_user.prompt = (
-            "Enter a value greater than Previous User Reading."
-        )
+    # ==========================================
+    # OPTIONAL:
+    # Clear any remaining old data below the last
+    # customer without deleting the rows.
+    # ==========================================
+    while row <= ws.max_row:
+        for col in ["A","B","C","D","E","F","G","H","I","J"]:
+            ws[f"{col}{row}"] = None
+        row += 1
 
-        ws.add_data_validation(dv_cur_user)
-        dv_cur_user.add(ws[f"I{row}"])
-
-        # -----------------------------
-        # CUR SUP (Column J)
-        # -----------------------------
-        dv_cur_sup = DataValidation(
-            type="custom",
-            formula1=f'=AND(J{row}>F{row},J{row}<>"")',
-            allow_blank=False
-        )
-        dv_cur_sup.errorTitle = "Invalid Supplier Reading"
-        dv_cur_sup.error = (
-            "Current Supplier Reading must be greater than Previous Supplier Reading "
-            "and cannot be empty."
-        )
-        dv_cur_sup.promptTitle = "Supplier Reading"
-        dv_cur_sup.prompt = (
-            "Enter a value greater than Previous Supplier Reading."
-        )
-
-        ws.add_data_validation(dv_cur_sup)
-        dv_cur_sup.add(ws[f"J{row}"])
-
-    # Optional: adjust column widths
-    for column_cells in ws.columns:
-        length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
-        ws.column_dimensions[get_column_letter(column_cells[0].column)].width = length + 3
-
-    # ==========================
-    # DOWNLOAD
-    # ==========================
+    # ==========================================
+    # RETURN FILE
+    # ==========================================
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    response["Content-Disposition"] = 'attachment; filename="readings_template.xlsx"'
+
+    response["Content-Disposition"] = (
+        'attachment; filename="readings_template.xlsx"'
+    )
 
     wb.save(response)
 
     return response
+
 
 @csrf_exempt
 def upload_readings_excel(request):
