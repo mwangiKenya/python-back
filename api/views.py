@@ -1295,6 +1295,7 @@ def download_readings_template(request):
     wb.save(response)
 
     return response
+
 @csrf_exempt
 def upload_readings_excel(request):
     if request.method != "POST":
@@ -1302,21 +1303,25 @@ def upload_readings_excel(request):
 
     try:
         file = request.FILES.get("file")
+
         if not file:
             return JsonResponse({"error": "No file uploaded"}, status=400)
 
         df = pd.read_excel(file)
 
-        required_columns = ["user_id"]
-        for col in required_columns:
-            if col not in df.columns:
-                return JsonResponse({"error": f"Missing required column: {col}"}, status=400)
+        if "user_id" not in df.columns:
+            return JsonResponse(
+                {"error": "Excel must contain user_id column"},
+                status=400
+            )
 
         processed = 0
         skipped = 0
 
         with transaction.atomic():
+
             for index, row in df.iterrows():
+
                 try:
                     user_id = row.get("user_id")
 
@@ -1324,40 +1329,117 @@ def upload_readings_excel(request):
                         skipped += 1
                         continue
 
-                    # -------- READ VALUES --------
-                    cur_user = row.get("cur_user")
-                    cur_sup = row.get("cur_sup")
-                    mid_user = row.get("mid_user")
-                    mid_sup = row.get("mid_sup")
+                    reading = readings.objects.select_for_update().get(
+                        user_id=int(user_id)
+                    )
 
-                    # -------- CLEAN NaN --------
-                    cur_user = None if pd.isna(cur_user) else int(cur_user)
-                    cur_sup = None if pd.isna(cur_sup) else int(cur_sup)
-                    mid_user = None if pd.isna(mid_user) else int(mid_user)
-                    mid_sup = None if pd.isna(mid_sup) else int(mid_sup)
+                    # ---------------------------------
+                    # READ VALUES
+                    # ---------------------------------
+                    cur_user = None if pd.isna(row.get("cur_user")) else int(row.get("cur_user"))
+                    cur_sup = None if pd.isna(row.get("cur_sup")) else int(row.get("cur_sup"))
+                    mid_user = None if pd.isna(row.get("mid_user")) else int(row.get("mid_user"))
+                    mid_sup = None if pd.isna(row.get("mid_sup")) else int(row.get("mid_sup"))
 
-                    # -------- SKIP EMPTY ROW --------
-                    if cur_user is None and cur_sup is None and mid_user is None and mid_sup is None:
+                    if (
+                        cur_user is None and
+                        cur_sup is None and
+                        mid_user is None and
+                        mid_sup is None
+                    ):
                         skipped += 1
                         continue
 
-                    # -------- PROCESS UPDATE --------
-                    process_reading_update(
-                        user_id=int(user_id),
-                        new_cur_user=cur_user,
-                        new_cur_sup=cur_sup,
-                        mid_user=mid_user,
-                        mid_sup=mid_sup,
-                        username="excel_upload",
-                        role="system"
-                    )
+                    # ---------------------------------
+                    # UPDATE READINGS
+                    # ---------------------------------
+
+                    if cur_user is not None:
+                        reading.cur_user = cur_user
+                        reading.units_used = max(
+                            0,
+                            cur_user - (reading.prev_user or 0)
+                        )
+
+                    if cur_sup is not None:
+                        reading.cur_sup = cur_sup
+
+                    if mid_user is not None:
+                        reading.mid_user = mid_user
+
+                    if mid_sup is not None:
+                        reading.mid_sup = mid_sup
+
+                    reading.save()
+
+                    # ==========================================
+                    # BILLING (EXACTLY LIKE submit_new_reading)
+                    # ==========================================
+
+                    bill_amount = reading.units_used * reading.rate
+
+                    if reading.units_used == 0:
+                        bill_amount = 300
+
+                    old_billing = Billings.objects.filter(
+                        user_id=reading.user_id
+                    ).first()
+
+                    previous_balance = Decimal("0")
+
+                    if old_billing:
+                        previous_balance = old_billing.bal or Decimal("0")
+
+                    total_balance = previous_balance + Decimal(str(bill_amount))
+
+                    billing = Billings.objects.filter(
+                        user_id=reading.user_id
+                    ).first()
+
+                    if billing:
+
+                        billing.name = reading.name
+                        billing.phone = reading.phone
+                        billing.units_used = reading.units_used
+                        billing.rate = reading.rate
+                        billing.bill = bill_amount
+                        billing.b_cd = previous_balance
+                        billing.bal = total_balance
+                        billing.paid = 0
+                        billing.status = "Unpaid"
+                        billing.prev_user = reading.prev_user
+                        billing.cur_user = reading.cur_user
+                        billing.sms_name = reading.metre_num
+                        billing.grp = reading.grp
+                        billing.parent = reading.parent
+
+                        billing.save()
+
+                    else:
+
+                        Billings.objects.create(
+                            user_id=reading.user_id,
+                            name=reading.name,
+                            phone=reading.phone,
+                            units_used=reading.units_used,
+                            rate=reading.rate,
+                            bill=bill_amount,
+                            b_cd=previous_balance,
+                            bal=total_balance,
+                            paid=0,
+                            status="Unpaid",
+                            prev_user=reading.prev_user,
+                            cur_user=reading.cur_user,
+                            sms_name=reading.metre_num,
+                            grp=reading.grp,
+                            parent=reading.parent
+                        )
 
                     processed += 1
 
                 except Exception as row_error:
-                    print(f"Row {index} skipped: {row_error}")
+                    print(f"Row {index}: {row_error}")
                     skipped += 1
-                    continue
 
         return JsonResponse({
             "message": "Excel uploaded successfully",
@@ -1367,7 +1449,6 @@ def upload_readings_excel(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
 #UPDAE CUSTOMER DETAILS IN ALL TABLES THAT HE EXISTS
 @csrf_exempt
 def update_user(request, user_id):
