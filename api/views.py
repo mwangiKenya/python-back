@@ -1775,3 +1775,44 @@ def update_all_users(request):
             {"error": str(e)},
             status=400
         )
+
+
+
+#SET ONE PHONE NUMBER FOR ALL USERS IN BILLINGS TABLE FOR TESTING
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+
+
+@csrf_exempt
+def update_all_bill_phones(request):
+    if request.method != "PUT":
+        return JsonResponse(
+            {"error": "PUT request required"},
+            status=405
+        )
+
+    try:
+        data = json.loads(request.body)
+
+        phone = data.get("phone")
+
+        if not phone:
+            return JsonResponse(
+                {"error": "Phone number is required"},
+                status=400
+            )
+
+        updated = Billings.objects.update(phone=phone)
+
+        return JsonResponse({
+            "success": True,
+            "updated": updated
+        })
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=400
+        )
