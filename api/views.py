@@ -1717,7 +1717,6 @@ def download_users_excel(request):
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from .models import WaterUser
 import json
 
 
@@ -1741,15 +1740,29 @@ def update_all_users(request):
             user.rate = customer["rate"]
             user.grp = customer["grp"]
             user.parent = customer["parent"]
-
-            # zone is read only, so don't update it
-
             user.save()
 
+            readings.objects.filter(user_id=user.id).update(
+                name=user.fname,
+                phone=user.phone,
+                metre_num=user.metre_num,
+                rate=user.rate,
+                grp=user.grp,
+                parent=user.parent
+            )
+
+            Billings.objects.filter(user_id=user.id).update(
+                name=user.fname,
+                phone=user.phone,
+                rate=user.rate,
+                sms_name=user.metre_num,
+                grp=user.grp,
+                parent=user.parent
+            )
         return JsonResponse({
-            "success": True,
-            "message": "All users updated successfully."
-        })
+                "success": True,
+                "message": "All users updated successfully."
+            })
 
     except read_users.DoesNotExist:
         return JsonResponse(
