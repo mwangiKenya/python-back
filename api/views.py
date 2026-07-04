@@ -1335,7 +1335,7 @@ def upload_readings_excel(request):
 
                     bill_amount = reading.units_used * reading.rate
 
-                    if reading.units_used == 0:
+                    if reading.units_used <= 2:
                         bill_amount = 300
 
                     old_billing = Billings.objects.filter(
