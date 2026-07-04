@@ -1714,3 +1714,51 @@ def download_users_excel(request):
     df.to_excel(response, index=False)
 
     return response
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from .models import WaterUser
+import json
+
+
+@csrf_exempt
+def update_all_users(request):
+    if request.method != "PUT":
+        return JsonResponse(
+            {"error": "PUT request required"},
+            status=405
+        )
+
+    try:
+        customers = json.loads(request.body)
+
+        for customer in customers:
+            user = read_users.objects.get(id=customer["id"])
+
+            user.fname = customer["fname"]
+            user.phone = customer["phone"]
+            user.metre_num = customer["metre_num"]
+            user.rate = customer["rate"]
+            user.grp = customer["grp"]
+            user.parent = customer["parent"]
+
+            # zone is read only, so don't update it
+
+            user.save()
+
+        return JsonResponse({
+            "success": True,
+            "message": "All users updated successfully."
+        })
+
+    except read_users.DoesNotExist:
+        return JsonResponse(
+            {"error": "One or more users do not exist."},
+            status=404
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=400
+        )
