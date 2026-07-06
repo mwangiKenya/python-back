@@ -1528,7 +1528,7 @@ def send_bulk_sms(customers):
 
     return response.json()
 
-
+'''
 @csrf_exempt
 def send_sms_view(request):
     if request.method == "POST":
@@ -1545,9 +1545,37 @@ def send_sms_view(request):
                 "message": "SMS sent successfully",
                 "data": result
             })
+        
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
+'''
+@csrf_exempt
+def send_sms_view(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            customers = data.get("customers", [])
+
+            if not customers:
+                return JsonResponse(
+                    {"error": "No customers selected"},
+                    status=400
+                )
+
+            result = send_bulk_sms(customers)
+
+            # Print the response in your Django console
+            print(result)
+
+            # Return the raw AdvantaSMS response
+            return JsonResponse(result, safe=False)
+
+        except Exception as e:
+            return JsonResponse(
+                {"error": str(e)},
+                status=500
+            )
 
 #DOWNLOAD BILLINGS EXCEL, FILL AND UPLOAD IT
 import pandas as pd
