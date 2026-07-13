@@ -173,7 +173,7 @@ class ReadingHistory(models.Model):
     
     class Meta:
         db_table = 'reading_history'
-        managed = True  # Django will create this table
+        managed = False
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['user_id', 'cycle_month']),
@@ -240,7 +240,7 @@ class PaymentHistory(models.Model):
     
     class Meta:
         db_table = 'payment_history'
-        managed = True
+        managed = False
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['user_id', 'timestamp']),
@@ -307,7 +307,7 @@ class BillingHistory(models.Model):
     
     class Meta:
         db_table = 'billing_history'
-        managed = True
+        managed = False
         ordering = ['-cycle_month', '-timestamp']
         indexes = [
             models.Index(fields=['user_id', 'cycle_month']),
@@ -363,7 +363,7 @@ class AuditTrail(models.Model):
     
     class Meta:
         db_table = 'audit_trail'
-        managed = True
+        managed = False
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['table_name', 'record_id']),
@@ -410,7 +410,7 @@ class BillingCycleHistory(models.Model):
     
     class Meta:
         db_table = 'billing_cycle_history'
-        managed = True
+        managed = False
         ordering = ['-cycle_month']
 
     def __str__(self):
@@ -453,7 +453,7 @@ class CustomerPaymentSummary(models.Model):
     
     class Meta:
         db_table = 'customer_payment_summary'
-        managed = True
+        managed = False
         ordering = ['-current_balance']
 
     def __str__(self):
