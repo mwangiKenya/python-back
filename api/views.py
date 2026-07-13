@@ -1945,3 +1945,348 @@ def process_reading_update(
             billing.save()
         
         update_customer_summary(user_id)
+
+# ============================================================
+# PAYMENT HISTORY FETCH ENDPOINTS
+# ============================================================
+
+@api_view(['GET'])
+def get_all_payment_history(request):
+    """
+    Fetch all payment history records with optional filters.
+    Returns complete payment history with customer details.
+    """
+    try:
+        # Get filter parameters
+        user_id = request.GET.get('user_id')
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        payment_method = request.GET.get('payment_method')
+        status = request.GET.get('status')
+        search = request.GET.get('search')  # Search by name or phone
+        
+        # Start with all payment history
+        payment_history_qs = PaymentHistory.objects.all()
+        
+        # Apply filters
+        if user_id:
+            payment_history_qs = payment_history_qs.filter(user_id=user_id)
+        
+        if start_date:
+            payment_history_qs = payment_history_qs.filter(payment_date__gte=start_date)
+        
+        if end_date:
+            payment_history_qs = payment_history_qs.filter(payment_date__lte=end_date)
+        
+        if payment_method:
+            payment_history_qs = payment_history_qs.filter(payment_method=payment_method)
+        
+        if status:
+            payment_history_qs = payment_history_qs.filter(status=status)
+        
+        if search:
+            payment_history_qs = payment_history_qs.filter(
+                Q(name__icontains=search) | Q(phone__icontains=search)
+            )
+        
+        # Order by most recent first
+        payment_history_qs = payment_history_qs.order_by('-timestamp')
+        
+        # Prepare data for frontend
+        data = []
+        for p in payment_history_qs:
+            data.append({
+                'id': p.id,
+                'billing_id': p.billing_id,
+                'user_id': p.user_id,
+                'name': p.name,
+                'phone': p.phone,
+                'grp': p.grp,
+                'parent': p.parent,
+                'amount_paid': float(p.amount_paid),
+                'previous_balance': float(p.previous_balance),
+                'current_balance': float(p.current_balance),
+                'bill_amount': float(p.bill_amount),
+                'payment_method': p.payment_method,
+                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
+                'status': p.status,
+                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
+                'receipt_number': p.receipt_number,
+                'notes': p.notes,
+                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
+                'recorded_by': p.recorded_by,
+                'role': p.role,
+                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
+            })
+        
+        # Get summary statistics
+        total_payments = payment_history_qs.count()
+        total_amount = payment_history_qs.aggregate(
+            total=Sum('amount_paid')
+        )['total'] or 0
+        
+        return Response({
+            'success': True,
+            'data': data,
+            'summary': {
+                'total_payments': total_payments,
+                'total_amount': float(total_amount),
+                'filters_applied': {
+                    'user_id': user_id,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'payment_method': payment_method,
+                    'status': status,
+                    'search': search
+                }
+            }
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_payment_history_by_user(request, user_id):
+    """
+    Fetch payment history for a specific user.
+    """
+    try:
+        payment_history = PaymentHistory.objects.filter(
+            user_id=user_id
+        ).order_by('-timestamp')
+        
+        if not payment_history.exists():
+            return Response({
+                'success': True,
+                'data': [],
+                'message': 'No payment history found for this user'
+            })
+        
+        data = []
+        for p in payment_history:
+            data.append({
+                'id': p.id,
+                'billing_id': p.billing_id,
+                'amount_paid': float(p.amount_paid),
+                'previous_balance': float(p.previous_balance),
+                'current_balance': float(p.current_balance),
+                'bill_amount': float(p.bill_amount),
+                'payment_method': p.payment_method,
+                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
+                'status': p.status,
+                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
+                'receipt_number': p.receipt_number,
+                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
+                'recorded_by': p.recorded_by,
+                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
+            })
+        
+        # Get user summary
+        user_summary = CustomerPaymentSummary.objects.filter(user_id=user_id).first()
+        
+        return Response({
+            'success': True,
+            'user_id': user_id,
+            'payment_history': data,
+            'summary': {
+                'total_paid': float(user_summary.total_paid) if user_summary else 0,
+                'current_balance': float(user_summary.current_balance) if user_summary else 0,
+                'payment_count': len(data),
+                'last_payment': data[0] if data else None
+            }
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_payment_summary(request):
+    """
+    Get summary statistics of all payments.
+    """
+    try:
+        # Get filter parameters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        payment_history_qs = PaymentHistory.objects.all()
+        
+        if start_date:
+            payment_history_qs = payment_history_qs.filter(payment_date__gte=start_date)
+        if end_date:
+            payment_history_qs = payment_history_qs.filter(payment_date__lte=end_date)
+        
+        # Aggregations
+        total_payments = payment_history_qs.count()
+        total_amount = payment_history_qs.aggregate(
+            total=Sum('amount_paid')
+        )['total'] or 0
+        
+        # Payment method breakdown
+        method_breakdown = payment_history_qs.values('payment_method').annotate(
+            count=Count('id'),
+            total=Sum('amount_paid')
+        ).order_by('-total')
+        
+        # Daily payment trend
+        daily_trend = payment_history_qs.values('payment_date').annotate(
+            count=Count('id'),
+            total=Sum('amount_paid')
+        ).order_by('-payment_date')[:30]  # Last 30 days
+        
+        # Prepare method breakdown with display names
+        method_data = []
+        for method in method_breakdown:
+            method_data.append({
+                'method': method['payment_method'],
+                'method_display': dict(PaymentHistory.PAYMENT_METHODS).get(method['payment_method'], method['payment_method']),
+                'count': method['count'],
+                'total': float(method['total'])
+            })
+        
+        return Response({
+            'success': True,
+            'summary': {
+                'total_payments': total_payments,
+                'total_amount': float(total_amount),
+                'average_payment': float(total_amount / total_payments) if total_payments > 0 else 0
+            },
+            'method_breakdown': method_data,
+            'daily_trend': list(daily_trend)
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_payment_receipt(request, receipt_number):
+    """
+    Get payment details by receipt number.
+    """
+    try:
+        payment = PaymentHistory.objects.filter(
+            receipt_number=receipt_number
+        ).first()
+        
+        if not payment:
+            return Response({
+                'success': False,
+                'error': 'Payment receipt not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get associated billing information
+        billing = Billings.objects.filter(id=payment.billing_id).first()
+        
+        data = {
+            'id': payment.id,
+            'billing_id': payment.billing_id,
+            'user_id': payment.user_id,
+            'name': payment.name,
+            'phone': payment.phone,
+            'grp': payment.grp,
+            'parent': payment.parent,
+            'amount_paid': float(payment.amount_paid),
+            'previous_balance': float(payment.previous_balance),
+            'current_balance': float(payment.current_balance),
+            'bill_amount': float(payment.bill_amount),
+            'payment_method': payment.payment_method,
+            'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(payment.payment_method, payment.payment_method),
+            'status': payment.status,
+            'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(payment.status, payment.status),
+            'receipt_number': payment.receipt_number,
+            'notes': payment.notes,
+            'payment_date': payment.payment_date.strftime('%Y-%m-%d') if payment.payment_date else None,
+            'recorded_by': payment.recorded_by,
+            'role': payment.role,
+            'timestamp': payment.timestamp.strftime('%Y-%m-%d %H:%M:%S') if payment.timestamp else None,
+            'billing_details': {
+                'units_used': billing.units_used if billing else None,
+                'rate': billing.rate if billing else None,
+                'bill_amount': billing.bill if billing else None,
+                'status': billing.status if billing else None
+            } if billing else None
+        }
+        
+        return Response({
+            'success': True,
+            'data': data
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================
+# SIMPLE JSON RESPONSE VERSION (if you prefer not to use DRF)
+# ============================================================
+
+def get_payment_history_json(request):
+    """
+    Simple JSON response version of payment history.
+    This uses regular Django JsonResponse instead of DRF.
+    """
+    try:
+        # Get all payment history
+        payments = PaymentHistory.objects.all().order_by('-timestamp')
+        
+        # Prepare data
+        data = []
+        for p in payments:
+            data.append({
+                'id': p.id,
+                'billing_id': p.billing_id,
+                'user_id': p.user_id,
+                'name': p.name,
+                'phone': p.phone,
+                'grp': p.grp,
+                'parent': p.parent,
+                'amount_paid': float(p.amount_paid),
+                'previous_balance': float(p.previous_balance),
+                'current_balance': float(p.current_balance),
+                'bill_amount': float(p.bill_amount),
+                'payment_method': p.payment_method,
+                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
+                'status': p.status,
+                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
+                'receipt_number': p.receipt_number,
+                'notes': p.notes,
+                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
+                'recorded_by': p.recorded_by,
+                'role': p.role,
+                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
+            })
+        
+        # Get summary
+        total_amount = PaymentHistory.objects.aggregate(
+            total=Sum('amount_paid')
+        )['total'] or 0
+        
+        return JsonResponse({
+            'success': True,
+            'data': data,
+            'summary': {
+                'total_payments': len(data),
+                'total_amount': float(total_amount)
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
