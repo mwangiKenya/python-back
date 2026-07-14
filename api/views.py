@@ -2286,7 +2286,7 @@ def get_payment_history_json(request):
                 'amount_paid': float(p.amount_paid),
                 'previous_balance': float(p.previous_balance),  # bal from Billings
                 'current_balance': float(p.current_balance),    # previous_balance - amount_paid
-                'bill_amount': float(p.bill_amount),
+                'bill_amount': float(p.previous_balance),
                 'payment_method': p.payment_method,
                 'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
                 'status': p.status,
@@ -2486,7 +2486,7 @@ def _draw_receipt(c, payment, billing):
 
     c.setFont("Helvetica-Bold", 13)
     c.setFillColor(WHITE)
-    c.drawString(20 * mm + pad, inner_y - 7 * mm, f"KES {float(payment.bill_amount):,.2f}")
+    c.drawString(20 * mm + pad, inner_y - 7 * mm, f"KES {float(payment.previus_balance):,.2f}")
     c.setFillColor(colors.HexColor('#7DD3FC'))
     c.drawString(20 * mm + pad + 55 * mm, inner_y - 7 * mm, f"KES {float(payment.amount_paid):,.2f}")
 
