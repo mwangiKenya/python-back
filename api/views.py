@@ -2347,7 +2347,7 @@ BORDER = colors.HexColor('#E2E8F0')
 
 COMPANY_NAME = "KAMENGO AGENCIES"
 COMPANY_SUBTITLE = "Water Utility Services"
-COMPANY_ADDRESS = "P.O. Box 1234-00100, Nairobi, Kenya  |  +254 700 000 000"
+COMPANY_ADDRESS = "+254 741 088 799"
 COMPANY_INITIALS = "KA"
 
 
@@ -2527,7 +2527,7 @@ def _draw_receipt(c, payment, billing):
     c.setFillColor(LIGHT_SLATE)
     c.drawCentredString(
         page_w / 2, footer_y - 1 * mm,
-        f"{COMPANY_NAME.title()}  \u2022  This is a system-generated receipt and does not require a signature."
+        f"{COMPANY_NAME.title()}  \u2022  This is a system-generated receipt."
     )
     c.drawCentredString(
         page_w / 2, footer_y - 5.5 * mm,
