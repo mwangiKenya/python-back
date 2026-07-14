@@ -31,6 +31,13 @@ import os
 from datetime import datetime, timedelta
 from django.utils import timezone
 import requests
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
 #======================================================================================
 # NEW HELPER FUNCTIONS FOR HISTORY TRACKING
@@ -1898,7 +1905,7 @@ def process_reading_update(
     if new_cur_user is not None:
         rate = reading.rate or 0
         bill_amount = units_used * rate
-        if units_used == 0:
+        if units_used <= 2:
             bill_amount = 300
         
         old_billing = Billings.objects.filter(user_id=user_id).first()
@@ -2284,6 +2291,203 @@ def get_payment_history_json(request):
                 'total_amount': float(total_amount)
             }
         })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+# ============================================================
+# PAYMENT RECEIPT DOWNLOAD
+# ============================================================
+
+def download_payment_receipt(request, receipt_number):
+    """
+    Download payment receipt as PDF.
+    """
+    try:
+        # Get payment record
+        payment = PaymentHistory.objects.filter(
+            receipt_number=receipt_number
+        ).first()
+        
+        if not payment:
+            return JsonResponse({
+                'success': False,
+                'error': 'Payment receipt not found'
+            }, status=404)
+        
+        # Get billing info
+        billing = Billings.objects.filter(id=payment.billing_id).first()
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+        
+        # Create custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1a237e'),
+            alignment=1,  # Center
+            spaceAfter=30
+        )
+        
+        heading_style = ParagraphStyle(
+            'Heading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor('#1a237e'),
+            spaceAfter=12
+        )
+        
+        normal_style = ParagraphStyle(
+            'Normal',
+            parent=styles['Normal'],
+            fontSize=12,
+            spaceAfter=6
+        )
+        
+        # Build PDF content
+        elements = []
+        
+        # Header
+        elements.append(Paragraph("WATER BILLING SYSTEM", title_style))
+        elements.append(Paragraph("Payment Receipt", heading_style))
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Receipt details
+        receipt_data = [
+            ['Receipt Number:', payment.receipt_number],
+            ['Date:', payment.payment_date.strftime('%Y-%m-%d %H:%M:%S') if payment.payment_date else 'N/A'],
+            ['Payment Method:', payment.payment_method],
+            ['Status:', payment.status],
+            ['Recorded By:', payment.recorded_by],
+        ]
+        
+        receipt_table = Table(receipt_data, colWidths=[2*inch, 4*inch])
+        receipt_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ]))
+        elements.append(receipt_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Customer details
+        elements.append(Paragraph("Customer Details", heading_style))
+        customer_data = [
+            ['Name:', payment.name],
+            ['Phone:', payment.phone],
+            ['Group:', payment.grp or 'N/A'],
+            ['Parent:', payment.parent or 'N/A'],
+        ]
+        
+        customer_table = Table(customer_data, colWidths=[2*inch, 4*inch])
+        customer_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ]))
+        elements.append(customer_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Payment details
+        elements.append(Paragraph("Payment Details", heading_style))
+        payment_data = [
+            ['Previous Balance:', f"KES {float(payment.previous_balance):,.2f}"],
+            ['Bill Amount:', f"KES {float(payment.bill_amount):,.2f}"],
+            ['Amount Paid:', f"KES {float(payment.amount_paid):,.2f}"],
+            ['Current Balance:', f"KES {float(payment.current_balance):,.2f}"],
+        ]
+        
+        # Highlight current balance
+        payment_table = Table(payment_data, colWidths=[2*inch, 4*inch])
+        payment_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('TEXTCOLOR', (1, 3), (1, 3), colors.red if payment.current_balance > 0 else colors.green),
+            ('FONTNAME', (1, 3), (1, 3), 'Helvetica-Bold'),
+        ]))
+        elements.append(payment_table)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # Billing details if available
+        if billing:
+            elements.append(Paragraph("Billing Details", heading_style))
+            billing_data = [
+                ['Units Used:', f"{billing.units_used or 0} m³"],
+                ['Rate:', f"KES {float(billing.rate or 0):,.2f} per m³"],
+                ['Bill Status:', billing.status or 'N/A'],
+            ]
+            
+            billing_table = Table(billing_data, colWidths=[2*inch, 4*inch])
+            billing_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ]))
+            elements.append(billing_table)
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # Notes if any
+        if payment.notes:
+            elements.append(Paragraph("Notes:", heading_style))
+            elements.append(Paragraph(payment.notes, normal_style))
+            elements.append(Spacer(1, 0.2*inch))
+        
+        # Footer
+        elements.append(Spacer(1, 0.5*inch))
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.grey,
+            alignment=1,
+        )
+        elements.append(Paragraph("Thank you for your payment!", footer_style))
+        elements.append(Paragraph("This is a computer-generated receipt.", footer_style))
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="receipt_{receipt_number}.pdf"'
+        
+        # Log the download
+        create_audit_trail(
+            username=request.GET.get('username', 'system'),
+            role=request.GET.get('role', 'system'),
+            action="DOWNLOAD",
+            table_name="payment_history",
+            record_id=payment.id,
+            description=f"Payment receipt downloaded: {receipt_number}",
+            request=request
+        )
+        
+        return response
         
     except Exception as e:
         return JsonResponse({
