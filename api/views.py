@@ -2321,8 +2321,219 @@ def get_payment_history_json(request):
 
 
 # ============================================================
-# PAYMENT RECEIPT DOWNLOAD
+# PAYMENT RECEIPT DOWNLOAD (modernized design)
 # ============================================================
+from io import BytesIO
+from textwrap import wrap
+from datetime import datetime
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+
+
+# ---------- Design tokens (tweak these to re-theme the receipt) ----------
+NAVY = colors.HexColor('#0F172A')
+SLATE = colors.HexColor('#475569')
+LIGHT_SLATE = colors.HexColor('#94A3B8')
+ACCENT = colors.HexColor('#0EA5E9')
+BG_LIGHT = colors.HexColor('#F1F5F9')
+GREEN = colors.HexColor('#16A34A')
+RED = colors.HexColor('#DC2626')
+AMBER = colors.HexColor('#D97706')
+WHITE = colors.white
+BORDER = colors.HexColor('#E2E8F0')
+
+COMPANY_NAME = "KAMENGO AGENCIES"
+COMPANY_SUBTITLE = "Water Utility Services"
+COMPANY_ADDRESS = "P.O. Box 1234-00100, Nairobi, Kenya  |  +254 700 000 000"
+COMPANY_INITIALS = "KA"
+
+
+def _status_color(status):
+    s = (status or "").strip().lower()
+    if s in ("completed", "paid", "success"):
+        return GREEN
+    if s in ("pending", "processing"):
+        return AMBER
+    return RED
+
+
+def _draw_receipt(c, payment, billing):
+    """Draws one modern, professional receipt onto the given canvas."""
+    page_w, page_h = A4
+
+    # ===== Header band =====
+    header_h = 42 * mm
+    c.setFillColor(NAVY)
+    c.rect(0, page_h - header_h, page_w, header_h, fill=1, stroke=0)
+
+    c.setFillColor(ACCENT)
+    c.rect(0, page_h - 3, page_w, 3, fill=1, stroke=0)
+
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(20 * mm, page_h - 20 * mm, COMPANY_NAME)
+    c.setFont("Helvetica", 9.5)
+    c.setFillColor(colors.HexColor('#CBD5E1'))
+    c.drawString(20 * mm, page_h - 26 * mm, COMPANY_SUBTITLE)
+    c.drawString(20 * mm, page_h - 31 * mm, COMPANY_ADDRESS)
+
+    c.setFillColor(ACCENT)
+    c.circle(page_w - 28 * mm, page_h - 20 * mm, 9 * mm, fill=1, stroke=0)
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(page_w - 28 * mm, page_h - 22.3 * mm, COMPANY_INITIALS)
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawRightString(page_w - 20 * mm, page_h - 34 * mm, "PAYMENT RECEIPT")
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.HexColor('#CBD5E1'))
+    c.drawRightString(page_w - 20 * mm, page_h - 38.5 * mm, payment.receipt_number)
+
+    y = page_h - header_h - 12 * mm
+
+    # ===== Status badge + issue date =====
+    status = (payment.status or "")
+    status_color = _status_color(status)
+    badge_text = status.upper() if status else "N/A"
+    c.setFont("Helvetica-Bold", 9)
+    badge_w = c.stringWidth(badge_text, "Helvetica-Bold", 9) + 14
+    c.setFillColor(status_color)
+    c.roundRect(20 * mm, y - 4, badge_w, 16, 8, fill=1, stroke=0)
+    c.setFillColor(WHITE)
+    c.drawString(20 * mm + 7, y, badge_text)
+
+    date_str = payment.payment_date.strftime('%d %b %Y, %I:%M %p') if payment.payment_date else 'N/A'
+    c.setFont("Helvetica", 9.5)
+    c.setFillColor(SLATE)
+    c.drawRightString(page_w - 20 * mm, y, f"Issued: {date_str}")
+
+    y -= 14 * mm
+
+    # ===== Billed To / Receipt details =====
+    col1_x = 20 * mm
+    col2_x = page_w / 2 + 5 * mm
+
+    def section_label(x, y, text):
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColor(LIGHT_SLATE)
+        c.drawString(x, y, text.upper())
+
+    section_label(col1_x, y, "Billed To")
+    section_label(col2_x, y, "Receipt Details")
+    y -= 6 * mm
+
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColor(NAVY)
+    c.drawString(col1_x, y, payment.name or "N/A")
+    c.drawString(col2_x, y, payment.receipt_number)
+    y -= 5.5 * mm
+
+    c.setFont("Helvetica", 9.5)
+    c.setFillColor(SLATE)
+    c.drawString(col1_x, y, payment.phone or "N/A")
+    c.drawString(col2_x, y, f"Status: {status if status else 'N/A'}")
+    y -= 12 * mm
+
+    c.setStrokeColor(BORDER)
+    c.setLineWidth(1)
+    c.line(20 * mm, y, page_w - 20 * mm, y)
+    y -= 10 * mm
+
+    # ===== Billing details (if available) =====
+    if billing:
+        section_label(col1_x, y, "Billing Details")
+        y -= 7 * mm
+
+        rows = [
+            ("Units Consumed", f"{billing.units_used or 0} m\u00b3"),
+            ("Rate per Unit", f"KES {float(billing.rate or 0):,.2f}"),
+            ("Bill Status", billing.status or "N/A"),
+        ]
+        row_h = 8 * mm
+        table_x = 20 * mm
+        table_w = page_w - 40 * mm
+
+        c.setFillColor(BG_LIGHT)
+        c.roundRect(table_x, y - row_h * len(rows) + 2 * mm, table_w, row_h * len(rows), 4, fill=1, stroke=0)
+
+        ry = y - 5.5 * mm
+        for label, value in rows:
+            c.setFont("Helvetica", 9.5)
+            c.setFillColor(SLATE)
+            c.drawString(table_x + 6 * mm, ry, label)
+            c.setFont("Helvetica-Bold", 9.5)
+            c.setFillColor(NAVY)
+            c.drawRightString(table_x + table_w - 6 * mm, ry, value)
+            ry -= row_h
+        y -= row_h * len(rows) + 6 * mm
+
+    # ===== Payment summary (highlighted box) =====
+    box_h = 34 * mm
+    box_y = y - box_h
+    c.setFillColor(NAVY)
+    c.roundRect(20 * mm, box_y, page_w - 40 * mm, box_h, 5, fill=1, stroke=0)
+
+    pad = 8 * mm
+    inner_y = box_y + box_h - 9 * mm
+
+    c.setFont("Helvetica", 8.5)
+    c.setFillColor(colors.HexColor('#94A3B8'))
+    c.drawString(20 * mm + pad, inner_y, "BILL AMOUNT")
+    c.drawString(20 * mm + pad + 55 * mm, inner_y, "AMOUNT PAID")
+
+    c.setFont("Helvetica-Bold", 13)
+    c.setFillColor(WHITE)
+    c.drawString(20 * mm + pad, inner_y - 7 * mm, f"KES {float(payment.bill_amount):,.2f}")
+    c.setFillColor(colors.HexColor('#7DD3FC'))
+    c.drawString(20 * mm + pad + 55 * mm, inner_y - 7 * mm, f"KES {float(payment.amount_paid):,.2f}")
+
+    c.setStrokeColor(colors.HexColor('#334155'))
+    c.line(20 * mm + pad, box_y + 11 * mm, page_w - 20 * mm - pad, box_y + 11 * mm)
+
+    bal = float(payment.current_balance)
+    bal_color = colors.HexColor('#86EFAC') if bal <= 0 else colors.HexColor('#FCA5A5')
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.HexColor('#CBD5E1'))
+    c.drawString(20 * mm + pad, box_y + 5 * mm, "CURRENT BALANCE")
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(bal_color)
+    c.drawRightString(page_w - 20 * mm - pad, box_y + 4.5 * mm, f"KES {bal:,.2f}")
+
+    y = box_y - 10 * mm
+
+    # ===== Notes =====
+    if getattr(payment, "notes", None):
+        section_label(col1_x, y, "Notes")
+        y -= 6 * mm
+        c.setFont("Helvetica", 9)
+        c.setFillColor(SLATE)
+        for line in wrap(payment.notes, 95):
+            c.drawString(col1_x, y, line)
+            y -= 5 * mm
+        y -= 4 * mm
+
+    # ===== Footer =====
+    footer_y = 18 * mm
+    c.setStrokeColor(BORDER)
+    c.line(20 * mm, footer_y + 10 * mm, page_w - 20 * mm, footer_y + 10 * mm)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColor(NAVY)
+    c.drawCentredString(page_w / 2, footer_y + 4 * mm, "Thank you for your payment!")
+    c.setFont("Helvetica", 8)
+    c.setFillColor(LIGHT_SLATE)
+    c.drawCentredString(
+        page_w / 2, footer_y - 1 * mm,
+        f"{COMPANY_NAME.title()}  \u2022  This is a system-generated receipt and does not require a signature."
+    )
+    c.drawCentredString(
+        page_w / 2, footer_y - 5.5 * mm,
+        f"Generated on {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
+    )
+
 
 def download_payment_receipt(request, receipt_number):
     """
@@ -2333,165 +2544,30 @@ def download_payment_receipt(request, receipt_number):
         payment = PaymentHistory.objects.filter(
             receipt_number=receipt_number
         ).first()
-        
+
         if not payment:
             return JsonResponse({
                 'success': False,
                 'error': 'Payment receipt not found'
             }, status=404)
-        
+
         # Get billing info
         billing = Billings.objects.filter(id=payment.billing_id).first()
-        
-        # Create PDF
+
+        # Build the PDF using low-level canvas drawing for full layout control
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-        
-        # Create custom styles
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1a237e'),
-            alignment=1,  # Center
-            spaceAfter=30
-        )
-        
-        heading_style = ParagraphStyle(
-            'Heading',
-            parent=styles['Heading2'],
-            fontSize=16,
-            textColor=colors.HexColor('#1a237e'),
-            spaceAfter=12
-        )
-        
-        normal_style = ParagraphStyle(
-            'Normal',
-            parent=styles['Normal'],
-            fontSize=12,
-            spaceAfter=6
-        )
-        
-        # Build PDF content
-        elements = []
-        
-        # Header
-        elements.append(Paragraph("KAMENGO AGENCIES", title_style))
-        elements.append(Paragraph("Payment Receipt", heading_style))
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # Receipt details
-        receipt_data = [
-            ['Receipt Number:', payment.receipt_number],
-            ['Payment Date:', payment.payment_date.strftime('%Y-%m-%d %H:%M:%S') if payment.payment_date else 'N/A'],
-            ['Payment Status:', payment.status],
-        ]
-        
-        receipt_table = Table(receipt_data, colWidths=[2*inch, 4*inch])
-        receipt_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-        ]))
-        elements.append(receipt_table)
-        elements.append(Spacer(1, 0.3*inch))
-        
-        # Customer details
-        elements.append(Paragraph("Customer Details", heading_style))
-        customer_data = [
-            ['Name:', payment.name],
-            ['Phone:', payment.phone],
-        ]
-        
-        customer_table = Table(customer_data, colWidths=[2*inch, 4*inch])
-        customer_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-        ]))
-        elements.append(customer_table)
-        elements.append(Spacer(1, 0.3*inch))
-        
-        # Payment details
-        elements.append(Paragraph("Payment Details", heading_style))
-        payment_data = [
-            ['Bill Amount:', f"KES {float(payment.bill_amount):,.2f}"],
-            ['Amount Paid:', f"KES {float(payment.amount_paid):,.2f}"],
-            ['Current Balance:', f"KES {float(payment.current_balance):,.2f}"],
-        ]
-        
-        # Highlight current balance
-        payment_table = Table(payment_data, colWidths=[2*inch, 4*inch])
-        payment_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ('TEXTCOLOR', (1, 3), (1, 3), colors.red if payment.current_balance > 0 else colors.green),
-            ('FONTNAME', (1, 3), (1, 3), 'Helvetica-Bold'),
-        ]))
-        elements.append(payment_table)
-        elements.append(Spacer(1, 0.3*inch))
-        
-        # Billing details if available
-        if billing:
-            elements.append(Paragraph("Billing Details", heading_style))
-            billing_data = [
-                ['Units Used:', f"{billing.units_used or 0} m³"],
-                ['Rate:', f"KES {float(billing.rate or 0):,.2f} per m³"],
-                ['Bill Status:', billing.status or 'N/A'],
-            ]
-            
-            billing_table = Table(billing_data, colWidths=[2*inch, 4*inch])
-            billing_table.setStyle(TableStyle([
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ]))
-            elements.append(billing_table)
-            elements.append(Spacer(1, 0.3*inch))
-        
-        # Notes if any
-        if payment.notes:
-            elements.append(Paragraph("Notes:", heading_style))
-            elements.append(Paragraph(payment.notes, normal_style))
-            elements.append(Spacer(1, 0.2*inch))
-        
-        # Footer
-        elements.append(Spacer(1, 0.5*inch))
-        footer_style = ParagraphStyle(
-            'Footer',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.grey,
-            alignment=1,
-        )
-        elements.append(Paragraph("Thank you for your payment!", footer_style))
-        elements.append(Paragraph("Kamengo agencies", footer_style))
-        
-        # Build PDF
-        doc.build(elements)
-        
-        # Get PDF data
+        c = canvas.Canvas(buffer, pagesize=A4)
+        _draw_receipt(c, payment, billing)
+        c.showPage()
+        c.save()
+
         pdf_data = buffer.getvalue()
         buffer.close()
-        
+
         # Create response
         response = HttpResponse(pdf_data, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="receipt_{receipt_number}.pdf"'
-        
+
         # Log the download
         create_audit_trail(
             username=request.GET.get('username', 'system'),
@@ -2502,9 +2578,9 @@ def download_payment_receipt(request, receipt_number):
             description=f"Payment receipt downloaded: {receipt_number}",
             request=request
         )
-        
+
         return response
-        
+
     except Exception as e:
         return JsonResponse({
             'success': False,
