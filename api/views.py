@@ -1162,7 +1162,7 @@ def update_paid(request):
             
             if amount > 0:
                 # Get the previous balance (bal from Billings before this payment)
-                previous_balance = billing.bal + amount  # bal + amount paid
+                previous_balance = billing.bal
                 
                 receipt = create_payment_history(
                     billing=billing,
@@ -1586,7 +1586,7 @@ def upload_billings_excel(request):
                 
                 if amount > 0:
                     # Get the previous balance (bal from Billings before this payment)
-                    previous_balance = billing.bal + amount  # bal + amount paid
+                    previous_balance = billing.bal
                     
                     create_payment_history(
                         billing=billing,
