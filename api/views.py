@@ -2377,17 +2377,15 @@ def download_payment_receipt(request, receipt_number):
         elements = []
         
         # Header
-        elements.append(Paragraph("WATER BILLING SYSTEM", title_style))
+        elements.append(Paragraph("KAMENGO AGENCIES", title_style))
         elements.append(Paragraph("Payment Receipt", heading_style))
         elements.append(Spacer(1, 0.2*inch))
         
         # Receipt details
         receipt_data = [
             ['Receipt Number:', payment.receipt_number],
-            ['Date:', payment.payment_date.strftime('%Y-%m-%d %H:%M:%S') if payment.payment_date else 'N/A'],
-            ['Payment Method:', payment.payment_method],
-            ['Status:', payment.status],
-            ['Recorded By:', payment.recorded_by],
+            ['Payment Date:', payment.payment_date.strftime('%Y-%m-%d %H:%M:%S') if payment.payment_date else 'N/A'],
+            ['Payment Status:', payment.status],
         ]
         
         receipt_table = Table(receipt_data, colWidths=[2*inch, 4*inch])
@@ -2407,8 +2405,6 @@ def download_payment_receipt(request, receipt_number):
         customer_data = [
             ['Name:', payment.name],
             ['Phone:', payment.phone],
-            ['Group:', payment.grp or 'N/A'],
-            ['Parent:', payment.parent or 'N/A'],
         ]
         
         customer_table = Table(customer_data, colWidths=[2*inch, 4*inch])
@@ -2426,7 +2422,6 @@ def download_payment_receipt(request, receipt_number):
         # Payment details
         elements.append(Paragraph("Payment Details", heading_style))
         payment_data = [
-            ['Previous Balance:', f"KES {float(payment.previous_balance):,.2f}"],
             ['Bill Amount:', f"KES {float(payment.bill_amount):,.2f}"],
             ['Amount Paid:', f"KES {float(payment.amount_paid):,.2f}"],
             ['Current Balance:', f"KES {float(payment.current_balance):,.2f}"],
