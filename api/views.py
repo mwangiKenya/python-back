@@ -2586,3 +2586,75 @@ def download_payment_receipt(request, receipt_number):
             'success': False,
             'error': str(e)
         }, status=500)
+    
+#=========================================================================================
+# ============================================================
+# DOWNLOAD USER PAYMENT HISTORY (MULTI-PAGE PDF)
+# ============================================================
+
+@api_view(['GET'])
+def download_user_payment_history(request, user_id):
+    """
+    Download complete payment history for a specific user as a multi-page PDF.
+    Each payment is formatted as a separate receipt page.
+    """
+    try:
+        # Get all payments for this user
+        payments = PaymentHistory.objects.filter(
+            user_id=user_id
+        ).order_by('-timestamp')
+        
+        if not payments.exists():
+            return Response({
+                'success': False,
+                'error': 'No payment history found for this user'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get user info from first payment
+        first_payment = payments.first()
+        user_name = first_payment.name
+        user_phone = first_payment.phone
+        
+        # Create PDF with multiple pages
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        
+        # Draw each payment as a separate page
+        for idx, payment in enumerate(payments):
+            # Get billing info for this payment
+            billing = Billings.objects.filter(id=payment.billing_id).first()
+            
+            # Draw the receipt
+            _draw_receipt(c, payment, billing)
+            
+            # Add a page break (except for the last page)
+            if idx < len(payments) - 1:
+                c.showPage()
+        
+        c.save()
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        filename = f"payment_history_{user_name}_{user_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        # Log the download
+        create_audit_trail(
+            username=request.GET.get('username', 'system'),
+            role=request.GET.get('role', 'system'),
+            action="DOWNLOAD",
+            table_name="payment_history",
+            record_id=None,
+            description=f"User payment history downloaded for {user_name} (ID: {user_id}) - {payments.count()} records",
+            request=request
+        )
+        
+        return response
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

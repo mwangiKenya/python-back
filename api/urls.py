@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data, send_sms_view, download_billings_template, upload_billings_excel, reset_mid_month_readings, billing_timer, finalize_month, restore_readings, start_billing_month, cycle_timer_status, set_cycle_duration, auto_shift_if_due, total_bal, download_users_excel, update_all_users, update_all_bill_phones, get_all_payment_history, get_billing_history, get_payment_history, get_payment_history_by_user, get_payment_history_json, get_payment_summary, get_payment_receipt, download_payment_receipt
+from .views import  water_users, read_data, login_user, new_user,update_user, submit_new_reading, bill, logs, update_paid, total_bill, register_user, list_employees, total_paid, avg_units, total_cust, total_units, users_login, delete_user, delete_employee, update_employee, download_readings_template, upload_readings_excel, hist_data, send_sms_view, download_billings_template, upload_billings_excel, reset_mid_month_readings, billing_timer, finalize_month, restore_readings, start_billing_month, cycle_timer_status, set_cycle_duration, auto_shift_if_due, total_bal, download_users_excel, update_all_users, update_all_bill_phones, get_all_payment_history, get_billing_history, get_payment_history, get_payment_history_by_user, get_payment_history_json, get_payment_summary, get_payment_receipt, download_payment_receipt, download_user_payment_history
 
 urlpatterns =[
     path('water_users/', water_users, name='water_users'), #fetch water users data
@@ -58,4 +58,5 @@ urlpatterns =[
     path('payment-history/receipt/<str:receipt_number>/', get_payment_receipt, name='get_payment_receipt'),
     path('payment-history/json/', get_payment_history_json, name='get_payment_history_json'),
     path('download_receipt/<str:receipt_number>/', download_payment_receipt, name='download_receipt'),
+    path('download-user-payment-history/<int:user_id>/', download_user_payment_history, name='download_user_payment_history'),
 ]
