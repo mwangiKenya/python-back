@@ -80,6 +80,7 @@ def create_payment_history(billing, amount, previous_balance,
         receipt_number = f"RCP-{datetime.now().strftime('%Y%m%d')}-{billing.id}-{secrets.token_hex(4).upper()}"
         
         # Calculate current balance correctly
+        # previous_balance = bal from Billings (total amount owed)
         # current_balance = previous_balance - amount_paid
         current_balance = previous_balance - amount
         
@@ -97,8 +98,8 @@ def create_payment_history(billing, amount, previous_balance,
             grp=billing.grp,
             parent=billing.parent,
             amount_paid=amount,
-            previous_balance=previous_balance,
-            current_balance=current_balance,
+            previous_balance=previous_balance,  # This is the bal from Billings
+            current_balance=current_balance,    # previous_balance - amount_paid
             bill_amount=billing.bill,
             payment_method=payment_method,
             status=status,
@@ -1101,14 +1102,15 @@ def update_paid(request):
                     amount = new_paid - old_paid
                     
                     if amount > 0:
-                        # Get the previous balance (balance before this payment)
-                        previous_balance = billing.bal + amount  # Current bal + amount paid
+                        # Get the previous balance (bal from Billings before this payment)
+                        # This is the total amount the customer owes
+                        previous_balance = billing.bal + amount  # bal + amount paid
                         
                         # Create payment history with corrected math
                         receipt = create_payment_history(
                             billing=billing,
                             amount=amount,
-                            previous_balance=previous_balance,
+                            previous_balance=previous_balance,  # bal + amount
                             payment_method='BULK',
                             recorded_by=item.get("username", "system"),
                             role=item.get("role", "system")
@@ -1159,8 +1161,8 @@ def update_paid(request):
             amount = new_paid - old_paid
             
             if amount > 0:
-                # Get the previous balance (balance before this payment)
-                previous_balance = billing.bal + amount  # Current bal + amount paid
+                # Get the previous balance (bal from Billings before this payment)
+                previous_balance = billing.bal + amount  # bal + amount paid
                 
                 receipt = create_payment_history(
                     billing=billing,
@@ -1583,8 +1585,8 @@ def upload_billings_excel(request):
                 amount = new_paid - old_paid
                 
                 if amount > 0:
-                    # Get the previous balance (balance before this payment)
-                    previous_balance = billing.bal + amount  # Current bal + amount paid
+                    # Get the previous balance (bal from Billings before this payment)
+                    previous_balance = billing.bal + amount  # bal + amount paid
                     
                     create_payment_history(
                         billing=billing,
@@ -2030,8 +2032,8 @@ def get_all_payment_history(request):
                 'grp': p.grp,
                 'parent': p.parent,
                 'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),
-                'current_balance': float(p.current_balance),
+                'previous_balance': float(p.previous_balance),  # This is the bal from Billings
+                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
                 'bill_amount': float(p.bill_amount),
                 'payment_method': p.payment_method,
                 'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
@@ -2098,8 +2100,8 @@ def get_payment_history_by_user(request, user_id):
                 'id': p.id,
                 'billing_id': p.billing_id,
                 'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),
-                'current_balance': float(p.current_balance),
+                'previous_balance': float(p.previous_balance),  # bal from Billings
+                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
                 'bill_amount': float(p.bill_amount),
                 'payment_method': p.payment_method,
                 'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
@@ -2224,8 +2226,8 @@ def get_payment_receipt(request, receipt_number):
             'grp': payment.grp,
             'parent': payment.parent,
             'amount_paid': float(payment.amount_paid),
-            'previous_balance': float(payment.previous_balance),
-            'current_balance': float(payment.current_balance),
+            'previous_balance': float(payment.previous_balance),  # bal from Billings
+            'current_balance': float(payment.current_balance),    # previous_balance - amount_paid
             'bill_amount': float(payment.bill_amount),
             'payment_method': payment.payment_method,
             'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(payment.payment_method, payment.payment_method),
@@ -2282,8 +2284,8 @@ def get_payment_history_json(request):
                 'grp': p.grp,
                 'parent': p.parent,
                 'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),
-                'current_balance': float(p.current_balance),
+                'previous_balance': float(p.previous_balance),  # bal from Billings
+                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
                 'bill_amount': float(p.bill_amount),
                 'payment_method': p.payment_method,
                 'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
