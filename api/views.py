@@ -2486,7 +2486,7 @@ def _draw_receipt(c, payment, billing):
 
     c.setFont("Helvetica-Bold", 13)
     c.setFillColor(WHITE)
-    c.drawString(20 * mm + pad, inner_y - 7 * mm, f"KES {float(payment.previus_balance):,.2f}")
+    c.drawString(20 * mm + pad, inner_y - 7 * mm, f"KES {float(payment.previous_balance):,.2f}")
     c.setFillColor(colors.HexColor('#7DD3FC'))
     c.drawString(20 * mm + pad + 55 * mm, inner_y - 7 * mm, f"KES {float(payment.amount_paid):,.2f}")
 
