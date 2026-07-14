@@ -75,9 +75,19 @@ def create_reading_history(reading, recorded_by="system", role="system"):
 def create_payment_history(billing, amount, previous_balance, 
                           payment_method='CASH', recorded_by="system", 
                           role="system", notes=None):
-    """Create a payment history record"""
+    """Create a payment history record with corrected math"""
     try:
         receipt_number = f"RCP-{datetime.now().strftime('%Y%m%d')}-{billing.id}-{secrets.token_hex(4).upper()}"
+        
+        # Calculate current balance correctly
+        # current_balance = previous_balance - amount_paid
+        current_balance = previous_balance - amount
+        
+        # Determine payment status
+        if amount >= previous_balance:
+            status = 'COMPLETED'
+        else:
+            status = 'PARTIAL'
         
         PaymentHistory.objects.create(
             billing_id=billing.id,
@@ -88,10 +98,10 @@ def create_payment_history(billing, amount, previous_balance,
             parent=billing.parent,
             amount_paid=amount,
             previous_balance=previous_balance,
-            current_balance=billing.bal,
+            current_balance=current_balance,
             bill_amount=billing.bill,
             payment_method=payment_method,
-            status='COMPLETED',
+            status=status,
             receipt_number=receipt_number,
             notes=notes,
             recorded_by=recorded_by,
@@ -1071,7 +1081,7 @@ def submit_new_reading(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 #======================================================================================
-# PAYMENT UPDATES
+# PAYMENT UPDATES (UPDATED WITH CORRECT MATH)
 #======================================================================================
 
 @csrf_exempt
@@ -1091,11 +1101,14 @@ def update_paid(request):
                     amount = new_paid - old_paid
                     
                     if amount > 0:
-                        # Create payment history
+                        # Get the previous balance (balance before this payment)
+                        previous_balance = billing.bal + amount  # Current bal + amount paid
+                        
+                        # Create payment history with corrected math
                         receipt = create_payment_history(
                             billing=billing,
                             amount=amount,
-                            previous_balance=billing.bal,
+                            previous_balance=previous_balance,
                             payment_method='BULK',
                             recorded_by=item.get("username", "system"),
                             role=item.get("role", "system")
@@ -1146,10 +1159,13 @@ def update_paid(request):
             amount = new_paid - old_paid
             
             if amount > 0:
+                # Get the previous balance (balance before this payment)
+                previous_balance = billing.bal + amount  # Current bal + amount paid
+                
                 receipt = create_payment_history(
                     billing=billing,
                     amount=amount,
-                    previous_balance=billing.bal,
+                    previous_balance=previous_balance,
                     payment_method=data.get("payment_method", 'CASH'),
                     recorded_by=data.get("username", "system"),
                     role=data.get("role", "system"),
@@ -1567,10 +1583,13 @@ def upload_billings_excel(request):
                 amount = new_paid - old_paid
                 
                 if amount > 0:
+                    # Get the previous balance (balance before this payment)
+                    previous_balance = billing.bal + amount  # Current bal + amount paid
+                    
                     create_payment_history(
                         billing=billing,
                         amount=amount,
-                        previous_balance=billing.bal,
+                        previous_balance=previous_balance,
                         payment_method='EXCEL',
                         recorded_by="excel_upload",
                         role="system"
@@ -2463,7 +2482,7 @@ def download_payment_receipt(request, receipt_number):
             alignment=1,
         )
         elements.append(Paragraph("Thank you for your payment!", footer_style))
-        elements.append(Paragraph("This is a computer-generated receipt.", footer_style))
+        elements.append(Paragraph("Kamengo agencies", footer_style))
         
         # Build PDF
         doc.build(elements)
