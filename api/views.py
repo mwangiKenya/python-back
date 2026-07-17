@@ -2658,3 +2658,311 @@ def download_user_payment_history(request, user_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================
+# READING HISTORY FETCH ENDPOINTS
+# ============================================================
+
+@api_view(['GET'])
+def get_reading_history_list(request):
+    """
+    Fetch all reading history records with advanced filtering and pagination.
+    Returns complete reading history with customer details and metadata.
+    """
+    try:
+        # Get filter parameters
+        user_id = request.GET.get('user_id')
+        cycle_month = request.GET.get('cycle_month')
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        search = request.GET.get('search')  # Search by name or phone
+        recorded_by = request.GET.get('recorded_by')
+        
+        # Pagination parameters
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 50))
+        offset = (page - 1) * page_size
+        
+        # Start with all reading history
+        history_qs = ReadingHistory.objects.all()
+        
+        # Apply filters
+        if user_id:
+            history_qs = history_qs.filter(user_id=user_id)
+        
+        if cycle_month:
+            history_qs = history_qs.filter(cycle_month=cycle_month)
+        
+        if start_date:
+            history_qs = history_qs.filter(reading_date__gte=start_date)
+        
+        if end_date:
+            history_qs = history_qs.filter(reading_date__lte=end_date)
+        
+        if search:
+            history_qs = history_qs.filter(
+                Q(name__icontains=search) | Q(phone__icontains=search)
+            )
+        
+        if recorded_by:
+            history_qs = history_qs.filter(recorded_by__icontains=recorded_by)
+        
+        # Get total count for pagination
+        total_count = history_qs.count()
+        
+        # Order by most recent first
+        history_qs = history_qs.order_by('-timestamp')
+        
+        # Apply pagination
+        history_qs = history_qs[offset:offset + page_size]
+        
+        # Prepare data for frontend
+        data = []
+        for h in history_qs:
+            data.append({
+                'id': h.id,
+                'reading_id': h.reading_id,
+                'user_id': h.user_id,
+                'name': h.name,
+                'phone': h.phone,
+                'metre_num': h.metre_num,
+                'grp': h.grp,
+                'parent': h.parent,
+                'prev_user': h.prev_user or 0,
+                'prev_sup': h.prev_sup or 0,
+                'cur_user': h.cur_user or 0,
+                'cur_sup': h.cur_sup or 0,
+                'mid_user': h.mid_user or 0,
+                'mid_sup': h.mid_sup or 0,
+                'units_used': h.units_used or 0,
+                'rate': h.rate or 0,
+                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
+                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
+                'cycle_month': h.cycle_month,
+                'recorded_by': h.recorded_by,
+                'role': h.role,
+                'version': h.version,
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
+            })
+        
+        # Get summary statistics
+        summary = {
+            'total_records': total_count,
+            'total_units': history_qs.aggregate(total=Sum('units_used'))['total'] or 0,
+            'unique_customers': ReadingHistory.objects.values('user_id').distinct().count(),
+            'latest_cycle': ReadingHistory.objects.order_by('-cycle_month').values('cycle_month').first(),
+            'filters_applied': {
+                'user_id': user_id,
+                'cycle_month': cycle_month,
+                'start_date': start_date,
+                'end_date': end_date,
+                'search': search,
+                'recorded_by': recorded_by
+            }
+        }
+        
+        return Response({
+            'success': True,
+            'data': data,
+            'summary': summary,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_count': total_count,
+                'total_pages': (total_count + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_reading_history_by_user(request, user_id):
+    """
+    Fetch reading history for a specific user.
+    """
+    try:
+        reading_history = ReadingHistory.objects.filter(
+            user_id=user_id
+        ).order_by('-timestamp')
+        
+        if not reading_history.exists():
+            return Response({
+                'success': True,
+                'data': [],
+                'message': 'No reading history found for this user'
+            })
+        
+        data = []
+        for h in reading_history:
+            data.append({
+                'id': h.id,
+                'reading_id': h.reading_id,
+                'user_id': h.user_id,
+                'name': h.name,
+                'phone': h.phone,
+                'metre_num': h.metre_num,
+                'grp': h.grp,
+                'parent': h.parent,
+                'prev_user': h.prev_user or 0,
+                'prev_sup': h.prev_sup or 0,
+                'cur_user': h.cur_user or 0,
+                'cur_sup': h.cur_sup or 0,
+                'mid_user': h.mid_user or 0,
+                'mid_sup': h.mid_sup or 0,
+                'units_used': h.units_used or 0,
+                'rate': h.rate or 0,
+                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
+                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
+                'cycle_month': h.cycle_month,
+                'recorded_by': h.recorded_by,
+                'role': h.role,
+                'version': h.version,
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
+            })
+        
+        return Response({
+            'success': True,
+            'user_id': user_id,
+            'reading_history': data,
+            'summary': {
+                'total_readings': len(data),
+                'total_units_used': sum(h['units_used'] for h in data),
+                'first_reading': data[-1] if data else None,
+                'latest_reading': data[0] if data else None
+            }
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_reading_history_summary(request):
+    """
+    Get summary statistics of all reading history.
+    """
+    try:
+        # Get filter parameters
+        cycle_month = request.GET.get('cycle_month')
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        history_qs = ReadingHistory.objects.all()
+        
+        if cycle_month:
+            history_qs = history_qs.filter(cycle_month=cycle_month)
+        if start_date:
+            history_qs = history_qs.filter(reading_date__gte=start_date)
+        if end_date:
+            history_qs = history_qs.filter(reading_date__lte=end_date)
+        
+        # Aggregations
+        total_readings = history_qs.count()
+        total_units = history_qs.aggregate(
+            total=Sum('units_used')
+        )['total'] or 0
+        
+        # Cycle breakdown
+        cycle_breakdown = history_qs.values('cycle_month').annotate(
+            count=Count('id'),
+            total_units=Sum('units_used'),
+            unique_customers=Count('user_id', distinct=True)
+        ).order_by('-cycle_month')
+        
+        # Recorded by breakdown
+        recorded_by_breakdown = history_qs.values('recorded_by').annotate(
+            count=Count('id')
+        ).order_by('-count')
+        
+        # Daily trend (last 30 days)
+        daily_trend = history_qs.values('reading_date').annotate(
+            count=Count('id'),
+            total_units=Sum('units_used')
+        ).order_by('-reading_date')[:30]
+        
+        return Response({
+            'success': True,
+            'summary': {
+                'total_readings': total_readings,
+                'total_units': float(total_units),
+                'average_units': float(total_units / total_readings) if total_readings > 0 else 0,
+                'unique_customers': history_qs.values('user_id').distinct().count()
+            },
+            'cycle_breakdown': list(cycle_breakdown),
+            'recorded_by_breakdown': list(recorded_by_breakdown),
+            'daily_trend': list(daily_trend)
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def get_reading_history_json(request):
+    """
+    Simple JSON response version of reading history.
+    This uses regular Django JsonResponse instead of DRF.
+    """
+    try:
+        # Get all reading history
+        history = ReadingHistory.objects.all().order_by('-timestamp')
+        
+        # Prepare data
+        data = []
+        for h in history:
+            data.append({
+                'id': h.id,
+                'reading_id': h.reading_id,
+                'user_id': h.user_id,
+                'name': h.name,
+                'phone': h.phone,
+                'metre_num': h.metre_num,
+                'grp': h.grp,
+                'parent': h.parent,
+                'prev_user': h.prev_user or 0,
+                'prev_sup': h.prev_sup or 0,
+                'cur_user': h.cur_user or 0,
+                'cur_sup': h.cur_sup or 0,
+                'mid_user': h.mid_user or 0,
+                'mid_sup': h.mid_sup or 0,
+                'units_used': h.units_used or 0,
+                'rate': h.rate or 0,
+                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
+                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
+                'cycle_month': h.cycle_month,
+                'recorded_by': h.recorded_by,
+                'role': h.role,
+                'version': h.version,
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
+            })
+        
+        # Get summary
+        total_units = ReadingHistory.objects.aggregate(
+            total=Sum('units_used')
+        )['total'] or 0
+        
+        return JsonResponse({
+            'success': True,
+            'data': data,
+            'summary': {
+                'total_records': len(data),
+                'total_units': float(total_units)
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
