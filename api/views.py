@@ -40,12 +40,16 @@ from reportlab.pdfgen import canvas
 from io import BytesIO
 
 #======================================================================================
-# NEW HELPER FUNCTIONS FOR HISTORY TRACKING
+# HELPER FUNCTIONS FOR HISTORY TRACKING - UPDATED WITH CURRENT DATE
 #======================================================================================
 
-def create_reading_history(reading, recorded_by="system", role="system"):
-    """Create a historical record of a reading"""
+def create_reading_history(reading, recorded_by="system", role="system", force_current_date=False):
+    """Create a historical record of a reading using current timestamp"""
     try:
+        # Use current time for the reading date to show when it was recorded
+        current_time = timezone.now()
+        current_date = current_time.date()
+        
         ReadingHistory.objects.create(
             reading_id=reading.id,
             user_id=reading.user_id,
@@ -62,15 +66,47 @@ def create_reading_history(reading, recorded_by="system", role="system"):
             mid_sup=reading.mid_sup,
             units_used=reading.units_used or 0,
             rate=reading.rate or 0,
-            reading_date=reading.cur_date or date.today(),
+            reading_date=current_date,  # Always use current date
             prev_date=reading.prev_date,
-            cycle_month=reading.cur_date.strftime("%Y-%m") if reading.cur_date else None,
+            cycle_month=current_date.strftime("%Y-%m"),  # Use current month for cycle
             recorded_by=recorded_by,
             role=role,
             version=getattr(reading, 'version', 1)
         )
     except Exception as e:
         print(f"Error creating reading history: {e}")
+
+def create_reading_history_with_values(reading, prev_user, prev_sup, cur_user, cur_sup, units_used, recorded_by="system", role="system"):
+    """Create a historical record with specific values - for Excel upload automation"""
+    try:
+        current_time = timezone.now()
+        current_date = current_time.date()
+        
+        ReadingHistory.objects.create(
+            reading_id=reading.id,
+            user_id=reading.user_id,
+            name=reading.name,
+            phone=reading.phone,
+            metre_num=reading.metre_num,
+            grp=reading.grp,
+            parent=reading.parent,
+            prev_user=prev_user or 0,
+            prev_sup=prev_sup or 0,
+            cur_user=cur_user or 0,
+            cur_sup=cur_sup or 0,
+            mid_user=reading.mid_user,
+            mid_sup=reading.mid_sup,
+            units_used=units_used or 0,
+            rate=reading.rate or 0,
+            reading_date=current_date,
+            prev_date=reading.prev_date,
+            cycle_month=current_date.strftime("%Y-%m"),
+            recorded_by=recorded_by,
+            role=role,
+            version=getattr(reading, 'version', 1)
+        )
+    except Exception as e:
+        print(f"Error creating reading history with values: {e}")
 
 def create_payment_history(billing, amount, previous_balance, 
                           payment_method='CASH', recorded_by="system", 
@@ -393,7 +429,7 @@ def auto_shift_if_due(request):
         next_cycle_date = date(next_year, next_month, next_last_day)
         
         for r in readings.objects.all():
-            # Create history before shifting
+            # Create history before shifting with current date
             create_reading_history(r, "system", "system")
             
             r.prev_user = r.cur_user if r.cur_user is not None else r.prev_user
@@ -589,7 +625,7 @@ def get_reading_history(request):
     
     data = list(history_qs.values(
         'id', 'name', 'phone', 'prev_user', 'cur_user', 
-        'units_used', 'cycle_month', 'timestamp', 'recorded_by'
+        'units_used', 'cycle_month', 'timestamp', 'recorded_by', 'reading_date'
     ))
     return Response(data)
 
@@ -645,7 +681,7 @@ def get_customer_history(request, user_id):
     try:
         reading_history = ReadingHistory.objects.filter(
             user_id=user_id
-        ).values('timestamp', 'cur_user', 'prev_user', 'units_used', 'cycle_month', 'recorded_by')
+        ).values('timestamp', 'cur_user', 'prev_user', 'units_used', 'cycle_month', 'recorded_by', 'reading_date')
         
         payment_history = PaymentHistory.objects.filter(
             user_id=user_id
@@ -788,7 +824,7 @@ def new_user(request):
                 parent=parent
             )
             
-            # Create initial reading history
+            # Create initial reading history with current date
             create_reading_history(reading, user_name, role)
             
             create_log(
@@ -967,7 +1003,7 @@ def delete_user(request, user_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 #======================================================================================
-# SUBMIT READINGS AND BILLING
+# SUBMIT READINGS AND BILLING - UPDATED WITH AUTOMATION
 #======================================================================================
 
 @csrf_exempt
@@ -986,8 +1022,12 @@ def submit_new_reading(request):
                     user_id=item["user_id"]
                 )
                 
-                # Save current state to history BEFORE updating
-                create_reading_history(reading, user_name, role)
+                # Store old values for history
+                old_prev_user = reading.prev_user or 0
+                old_prev_sup = reading.prev_sup or 0
+                old_cur_user = reading.cur_user or 0
+                old_cur_sup = reading.cur_sup or 0
+                old_units_used = reading.units_used or 0
                 
                 cur_user = item.get("cur_user")
                 cur_sup = item.get("cur_sup")
@@ -1003,6 +1043,9 @@ def submit_new_reading(request):
                 reading.mid_user = item.get("mid_user", reading.mid_user)
                 reading.mid_sup = item.get("mid_sup", reading.mid_sup)
                 reading.save()
+                
+                # Create history with current date and updated values
+                create_reading_history(reading, user_name, role)
                 
                 # BILLING
                 bill_amount = reading.units_used * reading.rate
@@ -1022,7 +1065,7 @@ def submit_new_reading(request):
                 
                 if billing:
                     # Save billing history before update
-                    cycle_month = reading.cur_date.strftime("%Y-%m") if reading.cur_date else None
+                    cycle_month = timezone.now().strftime("%Y-%m")
                     create_billing_history(billing, cycle_month, user_name, role)
                     
                     billing.name = reading.name
@@ -1061,7 +1104,7 @@ def submit_new_reading(request):
                         grp=reading.grp,
                         parent=reading.parent
                     )
-                    cycle_month = reading.cur_date.strftime("%Y-%m") if reading.cur_date else None
+                    cycle_month = timezone.now().strftime("%Y-%m")
                     create_billing_history(billing, cycle_month, user_name, role)
                     
                     # Create initial customer summary
@@ -1255,7 +1298,7 @@ def finalize_month(request):
                 current_cycle.save()
             
             for r in readings.objects.all():
-                # Create history before shift
+                # Create history before shift with current date
                 create_reading_history(r, username, role)
                 
                 if r.cur_user is not None:
@@ -1387,7 +1430,7 @@ def avg_units(request):
     return JsonResponse({"avg_units": round(float(avg), 2)})
 
 #======================================================================================
-# EXCEL UPLOAD/DOWNLOAD
+# EXCEL UPLOAD/DOWNLOAD - FULLY AUTOMATED VERSION
 #======================================================================================
 
 def download_readings_template(request):
@@ -1436,6 +1479,15 @@ def download_readings_template(request):
 
 @csrf_exempt
 def upload_readings_excel(request):
+    """
+    FULLY AUTOMATED Excel upload - NO manual button clicking needed.
+    Automatically:
+    1. Creates ReadingHistory with current date showing PREV and CUR readings
+    2. Updates the readings table with new values
+    3. Creates/updates billing with correct amounts
+    4. Updates customer summaries
+    5. Creates audit trail
+    """
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
@@ -1452,6 +1504,8 @@ def upload_readings_excel(request):
         
         processed = 0
         skipped = 0
+        errors = []
+        
         with transaction.atomic():
             for index, row in df.iterrows():
                 try:
@@ -1464,9 +1518,13 @@ def upload_readings_excel(request):
                         user_id=int(user_id)
                     )
                     
-                    # Create history before update
-                    create_reading_history(reading, "excel_upload", "system")
+                    # Store OLD values for history
+                    old_prev_user = reading.prev_user or 0
+                    old_prev_sup = reading.prev_sup or 0
+                    old_cur_user = reading.cur_user or 0
+                    old_cur_sup = reading.cur_sup or 0
                     
+                    # Get NEW values from Excel
                     cur_user = None if pd.isna(row.get("cur_user")) else int(row.get("cur_user"))
                     cur_sup = None if pd.isna(row.get("cur_sup")) else int(row.get("cur_sup"))
                     mid_user = None if pd.isna(row.get("mid_user")) else int(row.get("mid_user"))
@@ -1476,9 +1534,28 @@ def upload_readings_excel(request):
                         skipped += 1
                         continue
                     
+                    # Calculate units used
+                    units_used = reading.units_used or 0
+                    if cur_user is not None:
+                        units_used = max(0, cur_user - (reading.prev_user or 0))
+                    
+                    # CRITICAL FIX: Create history with BOTH PREV and CUR values BEFORE updating
+                    # This ensures both old and new readings are recorded
+                    create_reading_history_with_values(
+                        reading=reading,
+                        prev_user=old_prev_user,  # Old prev reading
+                        prev_sup=old_prev_sup,    # Old prev sup
+                        cur_user=cur_user if cur_user is not None else old_cur_user,  # New current reading
+                        cur_sup=cur_sup if cur_sup is not None else old_cur_sup,      # New current sup
+                        units_used=units_used,
+                        recorded_by="excel_upload",
+                        role="system"
+                    )
+                    
+                    # Now update the reading with new values
                     if cur_user is not None:
                         reading.cur_user = cur_user
-                        reading.units_used = max(0, cur_user - (reading.prev_user or 0))
+                        reading.units_used = units_used
                     if cur_sup is not None:
                         reading.cur_sup = cur_sup
                     if mid_user is not None:
@@ -1487,7 +1564,7 @@ def upload_readings_excel(request):
                         reading.mid_sup = mid_sup
                     reading.save()
                     
-                    # BILLING
+                    # BILLING - AUTOMATICALLY UPDATE
                     bill_amount = reading.units_used * reading.rate
                     if reading.units_used <= 2:
                         bill_amount = 300
@@ -1498,7 +1575,8 @@ def upload_readings_excel(request):
                     
                     billing = Billings.objects.filter(user_id=reading.user_id).first()
                     if billing:
-                        cycle_month = reading.cur_date.strftime("%Y-%m") if reading.cur_date else None
+                        # Create billing history before update
+                        cycle_month = timezone.now().strftime("%Y-%m")
                         create_billing_history(billing, cycle_month, "excel_upload", "system")
                         
                         billing.name = reading.name
@@ -1534,19 +1612,46 @@ def upload_readings_excel(request):
                             grp=reading.grp,
                             parent=reading.parent
                         )
-                        cycle_month = reading.cur_date.strftime("%Y-%m") if reading.cur_date else None
+                        cycle_month = timezone.now().strftime("%Y-%m")
                         create_billing_history(billing, cycle_month, "excel_upload", "system")
                     
+                    # Update customer summary
                     update_customer_summary(reading.user_id)
+                    
+                    # Create log entry
+                    create_log(
+                        username="excel_upload",
+                        role="system",
+                        action="UPDATE",
+                        table="readings",
+                        record_id=reading.id,
+                        description=f"Excel upload: Prev={old_prev_user} → Curr={cur_user}, Units={units_used}"
+                    )
+                    
                     processed += 1
-                except Exception as row_error:
-                    print(f"Row {index}: {row_error}")
+                    
+                except readings.DoesNotExist:
+                    errors.append(f"Row {index}: User ID {row.get('user_id')} not found")
                     skipped += 1
+                except Exception as row_error:
+                    errors.append(f"Row {index}: {str(row_error)}")
+                    skipped += 1
+            
+            # Create audit trail for the entire upload
+            create_audit_trail(
+                username="excel_upload",
+                role="system",
+                action="BULK_UPLOAD",
+                table_name="readings",
+                description=f"Excel upload: {processed} records processed, {skipped} skipped",
+                request=request
+            )
         
         return JsonResponse({
-            "message": "Excel uploaded successfully",
+            "message": "Excel uploaded and processed successfully",
             "processed_rows": processed,
-            "skipped_rows": skipped
+            "skipped_rows": skipped,
+            "errors": errors[:10]  # Return first 10 errors for debugging
         })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -1571,62 +1676,67 @@ def upload_billings_excel(request):
         file = request.FILES["file"]
         df = pd.read_excel(file)
         updated = []
+        errors = []
         
         with transaction.atomic():
-            for _, row in df.iterrows():
-                billing_id = row.get("id")
-                paid = row.get("paid")
-                if pd.isna(billing_id) or pd.isna(paid):
-                    continue
-                
-                billing = Billings.objects.get(id=int(billing_id))
-                old_paid = billing.paid
-                new_paid = Decimal(str(paid))
-                amount = new_paid - old_paid
-                
-                if amount > 0:
-                    # Get the previous balance (bal from Billings before this payment)
-                    previous_balance = billing.bal
+            for index, row in df.iterrows():
+                try:
+                    billing_id = row.get("id")
+                    paid = row.get("paid")
+                    if pd.isna(billing_id) or pd.isna(paid):
+                        continue
                     
-                    create_payment_history(
-                        billing=billing,
-                        amount=amount,
-                        previous_balance=previous_balance,
-                        payment_method='EXCEL',
-                        recorded_by="excel_upload",
-                        role="system"
+                    billing = Billings.objects.get(id=int(billing_id))
+                    old_paid = billing.paid
+                    new_paid = Decimal(str(paid))
+                    amount = new_paid - old_paid
+                    
+                    if amount > 0:
+                        # Get the previous balance (bal from Billings before this payment)
+                        previous_balance = billing.bal
+                        
+                        create_payment_history(
+                            billing=billing,
+                            amount=amount,
+                            previous_balance=previous_balance,
+                            payment_method='EXCEL',
+                            recorded_by="excel_upload",
+                            role="system"
+                        )
+                    
+                    billing.paid = new_paid
+                    total_due = (billing.bill or 0) + (billing.b_cd or 0)
+                    billing.bal = total_due - new_paid
+                    
+                    if new_paid == 0:
+                        billing.status = "Unpaid"
+                    elif new_paid < billing.bill:
+                        billing.status = "Partially Paid"
+                    else:
+                        billing.status = "Paid"
+                    billing.save()
+                    
+                    update_customer_summary(billing.user_id)
+                    
+                    create_log(
+                        "excel_upload",
+                        "system",
+                        "UPDATE",
+                        "billings",
+                        billing.id,
+                        f"Excel update: {old_paid} → {new_paid}",
+                        "paid",
+                        old_paid,
+                        new_paid
                     )
-                
-                billing.paid = new_paid
-                total_due = (billing.bill or 0) + (billing.b_cd or 0)
-                billing.bal = total_due - new_paid
-                
-                if new_paid == 0:
-                    billing.status = "Unpaid"
-                elif new_paid < billing.bill:
-                    billing.status = "Partially Paid"
-                else:
-                    billing.status = "Paid"
-                billing.save()
-                
-                update_customer_summary(billing.user_id)
-                
-                create_log(
-                    "excel_upload",
-                    "system",
-                    "UPDATE",
-                    "billings",
-                    billing.id,
-                    f"Excel update: {old_paid} → {new_paid}",
-                    "paid",
-                    old_paid,
-                    new_paid
-                )
-                updated.append(billing.id)
+                    updated.append(billing.id)
+                except Exception as e:
+                    errors.append(f"Row {index}: {str(e)}")
         
         return JsonResponse({
             "message": "Excel uploaded successfully",
-            "updated_count": len(updated)
+            "updated_count": len(updated),
+            "errors": errors[:10]
         })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -1680,7 +1790,7 @@ def reset_mid_month_readings(request):
                 old_mid_user = r.mid_user
                 old_mid_sup = r.mid_sup
                 
-                # Create history before reset
+                # Create history before reset with current date
                 create_reading_history(r, username, role)
                 
                 r.mid_user = 0
@@ -1871,8 +1981,11 @@ def process_reading_update(
                    "Reading record not found")
         return
     
-    # Create history before any changes
-    create_reading_history(reading, username, role)
+    # Store old values
+    old_prev_user = reading.prev_user or 0
+    old_prev_sup = reading.prev_sup or 0
+    old_cur_user = reading.cur_user or 0
+    old_cur_sup = reading.cur_sup or 0
     
     prev_user = reading.prev_user or 0
     prev_sup = reading.prev_sup or 0
@@ -1922,6 +2035,9 @@ def process_reading_update(
     reading.units_used = units_used
     reading.save()
     
+    # Create history with current date
+    create_reading_history(reading, username, role)
+    
     # BILLING
     if new_cur_user is not None:
         rate = reading.rate or 0
@@ -1955,7 +2071,7 @@ def process_reading_update(
         
         if not created:
             # Save billing history before update
-            cycle_month = reading.cur_date.strftime("%Y-%m") if reading.cur_date else None
+            cycle_month = timezone.now().strftime("%Y-%m")
             create_billing_history(billing, cycle_month, username, role)
             
             billing.units_used = units_used
