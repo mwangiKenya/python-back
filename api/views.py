@@ -2566,7 +2566,7 @@ def _draw_receipt(c, payment, billing):
         rows = [
             ("Units Consumed", f"{billing.units_used or 0} m\u00b3"),
             ("Rate per Unit", f"KES {float(billing.rate or 0):,.2f}"),
-            ("Bill Status", billing.status or "N/A"),
+            ("Bill Status", payment.status or "N/A"),
         ]
         row_h = 8 * mm
         table_x = 20 * mm
