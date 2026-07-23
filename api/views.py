@@ -537,9 +537,6 @@ def bill(request):
     bills = Billings.objects.all()
     data = []
     for b in bills:
-        # Calculate total due with penalty
-        total_due = (b.bill or 0) + (b.b_cd or 0) + (b.penalty or 0)
-        
         data.append({
             'id': b.id,
             'user_id': b.user_id,
@@ -552,13 +549,12 @@ def bill(request):
             'bal': b.bal,
             'status': b.status,
             'b_cd': b.b_cd,
+            'penalty': float(b.penalty) if b.penalty is not None else 0,
             'prev_user': b.prev_user,
             'cur_user': b.cur_user,
             'sms_name': b.sms_name,
             'grp': b.grp,
-            'parent': b.parent,
-            'penalty': b.penalty or 0,  # Add penalty to response
-            'total_due': total_due  # Add total due with penalty
+            'parent': b.parent
         })
     return JsonResponse(data, safe=False)
 
@@ -1065,14 +1061,11 @@ def submit_new_reading(request):
                     previous_balance = old_billing.bal or Decimal("0")
                     previous_paid = old_billing.paid or Decimal("0")
                 
+                # NOTE: a fresh billing cycle always resets penalty/discount back to 0.
+                # Any penalty or discount only applies to the current, already-billed cycle.
                 total_balance = previous_balance + Decimal(str(bill_amount))
                 billing = Billings.objects.filter(user_id=reading.user_id).first()
-                                
-                # Inside submit_new_reading function, update the billing creation part:
-
-                # Calculate total balance with penalty (default 0)
-                total_balance = previous_balance + Decimal(str(bill_amount)) + Decimal(str(reading.penalty or 0))
-
+                
                 if billing:
                     # Save billing history before update
                     cycle_month = timezone.now().strftime("%Y-%m")
@@ -1084,6 +1077,7 @@ def submit_new_reading(request):
                     billing.rate = reading.rate
                     billing.bill = bill_amount
                     billing.b_cd = previous_balance
+                    billing.penalty = 0  # reset penalty/discount for the new cycle
                     billing.bal = total_balance
                     billing.paid = 0
                     billing.status = "Unpaid"
@@ -1092,7 +1086,6 @@ def submit_new_reading(request):
                     billing.sms_name = reading.metre_num
                     billing.grp = reading.grp
                     billing.parent = reading.parent
-                    billing.penalty = 0  # Set default penalty to 0
                     billing.save()
                     
                     # Update customer summary
@@ -1106,6 +1099,7 @@ def submit_new_reading(request):
                         rate=reading.rate,
                         bill=bill_amount,
                         b_cd=previous_balance,
+                        penalty=0,
                         bal=total_balance,
                         paid=0,
                         status="Unpaid",
@@ -1113,15 +1107,14 @@ def submit_new_reading(request):
                         cur_user=reading.cur_user,
                         sms_name=reading.metre_num,
                         grp=reading.grp,
-                        parent=reading.parent,
-                        penalty=0  # Set default penalty to 0
+                        parent=reading.parent
                     )
                     cycle_month = timezone.now().strftime("%Y-%m")
                     create_billing_history(billing, cycle_month, user_name, role)
                     
                     # Create initial customer summary
-                    update_customer_summary(reading.user_id)    
-                                
+                    update_customer_summary(reading.user_id)
+                
                 create_audit_trail(
                     username=user_name,
                     role=role,
@@ -1172,12 +1165,13 @@ def update_paid(request):
                         )
                     
                     billing.paid = new_paid
-                    total_due = (billing.bill or 0) + (billing.b_cd or 0)
+                    penalty = billing.penalty or Decimal("0")
+                    total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
                     billing.bal = total_due - new_paid
                     
                     if new_paid == 0:
                         billing.status = "Unpaid"
-                    elif new_paid < billing.bill:
+                    elif new_paid < total_due:
                         billing.status = "Partially Paid"
                     else:
                         billing.status = "Paid"
@@ -1230,12 +1224,13 @@ def update_paid(request):
                 )
             
             billing.paid = new_paid
-            total_due = (billing.bill or 0) + (billing.b_cd or 0)
+            penalty = billing.penalty or Decimal("0")
+            total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
             billing.bal = total_due - new_paid
             
             if new_paid == 0:
                 billing.status = "Unpaid"
-            elif new_paid < billing.bill:
+            elif new_paid < total_due:
                 billing.status = "Partially Paid"
             else:
                 billing.status = "Paid"
@@ -1264,6 +1259,129 @@ def update_paid(request):
                 "status": billing.status,
                 "receipt_number": receipt if amount > 0 else None
             })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+#======================================================================================
+# PENALTY / DISCOUNT MANAGEMENT (NEW)
+#======================================================================================
+
+@csrf_exempt
+def update_billing_penalty(request):
+    """
+    Add, change, or clear a penalty/discount on a single billing record.
+
+    Expected POST body:
+        {
+            "id": <billing id>,
+            "type": "penalty" | "discount" | "reset",
+            "amount": <positive number, ignored for "reset">,
+            "username": "...",
+            "role": "..."
+        }
+
+    Storage rule: penalty column holds a POSITIVE number for a penalty and a
+    NEGATIVE number for a discount. "reset" sets it back to 0.
+
+    bal (amount to pay) is always recalculated as:
+        bal = bill + b_cd + penalty - paid
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        data = json.loads(request.body)
+        billing_id = data.get("id")
+        action_type = (data.get("type") or "").lower()
+        username = data.get("username", "system")
+        role = data.get("role", "system")
+
+        if not billing_id:
+            return JsonResponse({"error": "Billing id is required"}, status=400)
+        if action_type not in ("penalty", "discount", "reset"):
+            return JsonResponse(
+                {"error": "type must be 'penalty', 'discount' or 'reset'"},
+                status=400
+            )
+
+        with transaction.atomic():
+            try:
+                billing = Billings.objects.select_for_update().get(id=billing_id)
+            except Billings.DoesNotExist:
+                return JsonResponse({"error": "Billing record not found"}, status=404)
+
+            old_penalty = billing.penalty or Decimal("0")
+
+            if action_type == "reset":
+                new_penalty = Decimal("0")
+                label = "Removed penalty/discount"
+            else:
+                raw_amount = data.get("amount", 0)
+                try:
+                    amount = Decimal(str(raw_amount))
+                except Exception:
+                    return JsonResponse({"error": "Invalid amount"}, status=400)
+                if amount < 0:
+                    amount = -amount  # amount is always entered as a positive number
+
+                if action_type == "penalty":
+                    new_penalty = amount
+                    label = f"Added penalty of {amount}"
+                else:  # discount
+                    new_penalty = -amount
+                    label = f"Added discount of {amount}"
+
+            billing.penalty = new_penalty
+
+            paid = billing.paid or Decimal("0")
+            total_due = (billing.bill or 0) + (billing.b_cd or 0) + new_penalty
+            billing.bal = total_due - paid
+
+            if paid == 0:
+                billing.status = "Unpaid"
+            elif paid < total_due:
+                billing.status = "Partially Paid"
+            else:
+                billing.status = "Paid"
+
+            billing.save()
+
+            # Update customer summary to reflect the new balance
+            update_customer_summary(billing.user_id)
+
+            create_log(
+                username=username,
+                role=role,
+                action="UPDATE",
+                table="billings",
+                record_id=billing.id,
+                field_changed="penalty",
+                old_val=old_penalty,
+                new_val=new_penalty,
+                description=f"{label} for {billing.name}"
+            )
+            create_audit_trail(
+                username=username,
+                role=role,
+                action="UPDATE",
+                table_name="billings",
+                record_id=billing.id,
+                field_changed="penalty",
+                old_value=str(old_penalty),
+                new_value=str(new_penalty),
+                description=f"{label} for {billing.name}",
+                request=request
+            )
+
+        return JsonResponse({
+            "message": "Penalty/discount updated successfully",
+            "id": billing.id,
+            "penalty": float(billing.penalty),
+            "bill": billing.bill,
+            "b_cd": billing.b_cd,
+            "paid": billing.paid,
+            "bal": billing.bal,
+            "status": billing.status
+        })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1597,6 +1715,7 @@ def upload_readings_excel(request):
                         billing.rate = reading.rate
                         billing.bill = bill_amount
                         billing.b_cd = previous_balance
+                        billing.penalty = 0  # reset penalty/discount for the new cycle
                         billing.bal = total_balance
                         billing.paid = 0
                         billing.status = "Unpaid"
@@ -1615,6 +1734,7 @@ def upload_readings_excel(request):
                             rate=reading.rate,
                             bill=bill_amount,
                             b_cd=previous_balance,
+                            penalty=0,
                             bal=total_balance,
                             paid=0,
                             status="Unpaid",
@@ -1717,12 +1837,13 @@ def upload_billings_excel(request):
                         )
                     
                     billing.paid = new_paid
-                    total_due = (billing.bill or 0) + (billing.b_cd or 0)
+                    penalty = billing.penalty or Decimal("0")
+                    total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
                     billing.bal = total_due - new_paid
                     
                     if new_paid == 0:
                         billing.status = "Unpaid"
-                    elif new_paid < billing.bill:
+                    elif new_paid < total_due:
                         billing.status = "Partially Paid"
                     else:
                         billing.status = "Paid"
@@ -2070,6 +2191,7 @@ def process_reading_update(
                 "rate": rate,
                 "bill": bill_amount,
                 "paid": 0,
+                "penalty": 0,
                 "bal": bill_amount,
                 "status": "Unpaid",
                 "b_cd": previous_balance,
@@ -2089,6 +2211,7 @@ def process_reading_update(
             billing.units_used = units_used
             billing.bill = bill_amount
             billing.paid = 0
+            billing.penalty = 0  # reset penalty/discount for the new cycle
             billing.b_cd = previous_balance
             billing.bal = previous_balance + Decimal(str(bill_amount))
             
@@ -3094,316 +3217,3 @@ def get_reading_history_json(request):
             'success': False,
             'error': str(e)
         }, status=500)
-
-
-# ============================================================
-# PENALTY & DISCOUNT ENDPOINTS
-# ============================================================
-
-@csrf_exempt
-@api_view(['POST'])
-def add_penalty(request):
-    """
-    Add penalty to a customer's bill.
-    """
-    try:
-        data = json.loads(request.body)
-        billing_id = data.get('billing_id')
-        amount = Decimal(str(data.get('amount', 0)))
-        username = data.get('username', 'system')
-        role = data.get('role', 'system')
-        
-        if not billing_id or amount <= 0:
-            return Response({
-                'success': False,
-                'error': 'Invalid billing ID or amount'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        with transaction.atomic():
-            billing = Billings.objects.select_for_update().get(id=billing_id)
-            
-            # Store old values for history
-            old_penalty = billing.penalty or 0
-            old_bal = billing.bal
-            
-            # Update penalty (positive for penalty)
-            billing.penalty = old_penalty + float(amount)
-            
-            # Recalculate balance: bill + b_cd + penalty
-            total_due = (billing.bill or 0) + (billing.b_cd or 0) + billing.penalty
-            billing.bal = total_due - (billing.paid or 0)
-            
-            # Update status if needed
-            if billing.paid == 0 and billing.bal > 0:
-                billing.status = "Unpaid"
-            
-            billing.save()
-            
-            # Create audit trail
-            create_audit_trail(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table_name="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_value=old_penalty,
-                new_value=billing.penalty,
-                description=f"Penalty of {amount} added for {billing.name}",
-                request=request
-            )
-            
-            create_log(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_val=old_penalty,
-                new_val=billing.penalty,
-                description=f"Penalty of {amount} added for {billing.name}"
-            )
-            
-            return Response({
-                'success': True,
-                'message': 'Penalty added successfully',
-                'data': {
-                    'id': billing.id,
-                    'penalty': billing.penalty,
-                    'bal': billing.bal,
-                    'status': billing.status
-                }
-            })
-            
-    except Billings.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Billing record not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@csrf_exempt
-@api_view(['POST'])
-def add_discount(request):
-    """
-    Add discount to a customer's bill.
-    """
-    try:
-        data = json.loads(request.body)
-        billing_id = data.get('billing_id')
-        amount = Decimal(str(data.get('amount', 0)))
-        username = data.get('username', 'system')
-        role = data.get('role', 'system')
-        
-        if not billing_id or amount <= 0:
-            return Response({
-                'success': False,
-                'error': 'Invalid billing ID or amount'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        with transaction.atomic():
-            billing = Billings.objects.select_for_update().get(id=billing_id)
-            
-            # Store old values for history
-            old_penalty = billing.penalty or 0
-            old_bal = billing.bal
-            
-            # Update penalty (negative for discount)
-            billing.penalty = old_penalty - float(amount)
-            
-            # Recalculate balance: bill + b_cd + penalty
-            total_due = (billing.bill or 0) + (billing.b_cd or 0) + billing.penalty
-            billing.bal = total_due - (billing.paid or 0)
-            
-            # Ensure balance doesn't go negative (optional)
-            if billing.bal < 0:
-                billing.bal = 0
-            
-            # Update status if needed
-            if billing.paid == 0 and billing.bal > 0:
-                billing.status = "Unpaid"
-            elif billing.bal == 0 and billing.paid >= 0:
-                billing.status = "Paid"
-            
-            billing.save()
-            
-            # Create audit trail
-            create_audit_trail(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table_name="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_value=old_penalty,
-                new_value=billing.penalty,
-                description=f"Discount of {amount} applied for {billing.name}",
-                request=request
-            )
-            
-            create_log(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_val=old_penalty,
-                new_val=billing.penalty,
-                description=f"Discount of {amount} applied for {billing.name}"
-            )
-            
-            return Response({
-                'success': True,
-                'message': 'Discount applied successfully',
-                'data': {
-                    'id': billing.id,
-                    'penalty': billing.penalty,
-                    'bal': billing.bal,
-                    'status': billing.status
-                }
-            })
-            
-    except Billings.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Billing record not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@csrf_exempt
-@api_view(['POST'])
-def remove_penalty_discount(request):
-    """
-    Remove penalty/discount (set to 0) for a customer.
-    """
-    try:
-        data = json.loads(request.body)
-        billing_id = data.get('billing_id')
-        username = data.get('username', 'system')
-        role = data.get('role', 'system')
-        
-        if not billing_id:
-            return Response({
-                'success': False,
-                'error': 'Billing ID required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        with transaction.atomic():
-            billing = Billings.objects.select_for_update().get(id=billing_id)
-            
-            # Store old value for history
-            old_penalty = billing.penalty or 0
-            
-            # Reset penalty to 0
-            billing.penalty = 0
-            
-            # Recalculate balance: bill + b_cd + penalty (0)
-            total_due = (billing.bill or 0) + (billing.b_cd or 0)
-            billing.bal = total_due - (billing.paid or 0)
-            
-            # Update status if needed
-            if billing.paid == 0 and billing.bal > 0:
-                billing.status = "Unpaid"
-            elif billing.bal == 0 and billing.paid >= 0:
-                billing.status = "Paid"
-            
-            billing.save()
-            
-            # Create audit trail
-            create_audit_trail(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table_name="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_value=old_penalty,
-                new_value=0,
-                description=f"Penalty/Discount removed for {billing.name}",
-                request=request
-            )
-            
-            create_log(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_val=old_penalty,
-                new_val=0,
-                description=f"Penalty/Discount removed for {billing.name}"
-            )
-            
-            return Response({
-                'success': True,
-                'message': 'Penalty/Discount removed successfully',
-                'data': {
-                    'id': billing.id,
-                    'penalty': 0,
-                    'bal': billing.bal,
-                    'status': billing.status
-                }
-            })
-            
-    except Billings.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Billing record not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['GET'])
-def get_billing_with_penalty(request, billing_id):
-    """
-    Get billing details including penalty information.
-    """
-    try:
-        billing = Billings.objects.get(id=billing_id)
-        
-        return Response({
-            'success': True,
-            'data': {
-                'id': billing.id,
-                'user_id': billing.user_id,
-                'name': billing.name,
-                'phone': billing.phone,
-                'units_used': billing.units_used,
-                'rate': billing.rate,
-                'bill': billing.bill,
-                'b_cd': billing.b_cd,
-                'paid': billing.paid,
-                'bal': billing.bal,
-                'penalty': billing.penalty or 0,
-                'status': billing.status,
-                'total_due': (billing.bill or 0) + (billing.b_cd or 0) + (billing.penalty or 0)
-            }
-        })
-        
-    except Billings.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Billing record not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

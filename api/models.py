@@ -57,7 +57,6 @@ class Admin(models.Model):
         managed = False
 
 
-# Add this field to your Billings model
 class Billings(models.Model):
     id = models.AutoField(primary_key=True)
     user_id = models.IntegerField()
@@ -77,8 +76,10 @@ class Billings(models.Model):
     grp = models.CharField(max_length=20)
     parent = models.CharField(max_length=20)
     last_modified = models.DateTimeField(auto_now=True)
-    penalty = models.FloatField(default=0)  # NEW FIELD - can be positive (penalty) or negative (discount)
-    
+    # NEW FIELD: stores a positive penalty amount or a negative discount amount.
+    # Defaults to 0 so all existing billing math is unaffected until a user acts on it.
+    penalty = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
     class Meta:
         ordering = ["user_id"]
         db_table = 'billings'
