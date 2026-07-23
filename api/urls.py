@@ -64,5 +64,5 @@ urlpatterns =[
     path('reading-history/user/<int:user_id>/', get_reading_history_by_user, name='get_reading_history_by_user'),
     path('reading-history/summary/', get_reading_history_summary, name='get_reading_history_summary'),
     path('reading-history/json/', get_reading_history_json, name='get_reading_history_json'),
-    path('aupdate-billing-penalty/', update_billing_penalty, name='update_billing_penalty'),
+    path('update-billing-penalty/', update_billing_penalty, name='update_billing_penalty'),
 ]
