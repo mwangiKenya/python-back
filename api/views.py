@@ -1,87 +1,104 @@
 from django.http import JsonResponse, HttpResponse
-from .models import (
-    read_users, readings, Admin, Billings, Logs, Users, history,
-    ReadingHistory, PaymentHistory, BillingHistory, AuditTrail, 
-    BillingCycleHistory, CustomerPaymentSummary
-)
 from django.views.decorators.csrf import csrf_exempt
-import json
-import secrets
 from django.db import transaction
-from datetime import date
-from decimal import Decimal
 from django.db.models import Sum, Avg, Count, Q
+from django.conf import settings
+from django.utils import timezone
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .sms import send_sms
-import calendar
-from datetime import datetime, date, timedelta
-import pandas as pd
-from django.db import transaction
-from django.http import JsonResponse
-from datetime import date, datetime
-from .models import read_users, readings, Billings, Logs
-from openpyxl import Workbook
-from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.utils import get_column_letter
-from django.conf import settings
-from openpyxl import load_workbook
+
+import json
 import os
-from datetime import datetime, timedelta
-from django.utils import timezone
-import requests
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
+import calendar
+import secrets
 from io import BytesIO
+from textwrap import wrap
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+
+import pandas as pd
+import requests
+from openpyxl import load_workbook
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+
+from .models import (
+    read_users, readings, Admin, Billings, Logs, Users, history,
+    ReadingHistory, PaymentHistory, BillingHistory, AuditTrail,
+    BillingCycleHistory, CustomerPaymentSummary
+)
 
 #======================================================================================
-# HELPER FUNCTIONS FOR HISTORY TRACKING - UPDATED WITH CURRENT DATE
+# LOGGING / HISTORY / AUDIT HELPERS
 #======================================================================================
 
-def create_reading_history(reading, recorded_by="system", role="system", force_current_date=False):
-    """Create a historical record of a reading using current timestamp"""
+def create_log(username, role, action, table, record_id, description,
+               field_changed=None, old_val=None, new_val=None):
+    """Write a row to the lightweight Logs table."""
+    Logs.objects.create(
+        username=username,
+        role=role,
+        action=action,
+        table_name=table,
+        record_id=record_id,
+        field_changed=field_changed,
+        old_val=str(old_val) if old_val is not None else None,
+        new_val=str(new_val) if new_val is not None else None,
+        description=description
+    )
+
+
+def create_audit_trail(username, role, action, table_name=None, record_id=None,
+                        field_changed=None, old_value=None, new_value=None,
+                        description=None, request=None):
+    """Write a row to the AuditTrail table, capturing request metadata if given."""
     try:
-        # Use current time for the reading date to show when it was recorded
-        current_time = timezone.now()
-        current_date = current_time.date()
-        
-        ReadingHistory.objects.create(
-            reading_id=reading.id,
-            user_id=reading.user_id,
-            name=reading.name,
-            phone=reading.phone,
-            metre_num=reading.metre_num,
-            grp=reading.grp,
-            parent=reading.parent,
-            prev_user=reading.prev_user or 0,
-            prev_sup=reading.prev_sup or 0,
-            cur_user=reading.cur_user or 0,
-            cur_sup=reading.cur_sup or 0,
-            mid_user=reading.mid_user,
-            mid_sup=reading.mid_sup,
-            units_used=reading.units_used or 0,
-            rate=reading.rate or 0,
-            reading_date=current_date,  # Always use current date
-            prev_date=reading.prev_date,
-            cycle_month=current_date.strftime("%Y-%m"),  # Use current month for cycle
-            recorded_by=recorded_by,
+        ip_address = None
+        user_agent = None
+        session_id = None
+
+        if request:
+            ip_address = request.META.get('REMOTE_ADDR')
+            user_agent = request.META.get('HTTP_USER_AGENT')
+            session_id = request.session.session_key
+
+        AuditTrail.objects.create(
+            username=username,
             role=role,
-            version=getattr(reading, 'version', 1)
+            action=action,
+            table_name=table_name,
+            record_id=record_id,
+            field_changed=field_changed,
+            old_value=old_value,
+            new_value=new_value,
+            description=description or f"{action} performed by {username}",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_id=session_id
         )
     except Exception as e:
-        print(f"Error creating reading history: {e}")
+        print(f"Error creating audit trail: {e}")
 
-def create_reading_history_with_values(reading, prev_user, prev_sup, cur_user, cur_sup, units_used, recorded_by="system", role="system"):
-    """Create a historical record with specific values - for Excel upload automation"""
+
+def create_reading_history(reading, recorded_by="system", role="system",
+                            prev_user=None, prev_sup=None,
+                            cur_user=None, cur_sup=None, units_used=None):
+    """
+    Create a historical snapshot of a reading, stamped with the current
+    timestamp/cycle month.
+
+    By default the reading's own current field values are recorded. Pass
+    explicit prev_user/prev_sup/cur_user/cur_sup/units_used to override
+    individual values (used by the Excel-upload flow, which needs to record
+    the old "prev" values alongside brand-new "cur" values in one snapshot).
+    """
     try:
-        current_time = timezone.now()
-        current_date = current_time.date()
-        
+        current_date = timezone.now().date()
         ReadingHistory.objects.create(
             reading_id=reading.id,
             user_id=reading.user_id,
@@ -90,13 +107,13 @@ def create_reading_history_with_values(reading, prev_user, prev_sup, cur_user, c
             metre_num=reading.metre_num,
             grp=reading.grp,
             parent=reading.parent,
-            prev_user=prev_user or 0,
-            prev_sup=prev_sup or 0,
-            cur_user=cur_user or 0,
-            cur_sup=cur_sup or 0,
+            prev_user=(reading.prev_user if prev_user is None else prev_user) or 0,
+            prev_sup=(reading.prev_sup if prev_sup is None else prev_sup) or 0,
+            cur_user=(reading.cur_user if cur_user is None else cur_user) or 0,
+            cur_sup=(reading.cur_sup if cur_sup is None else cur_sup) or 0,
             mid_user=reading.mid_user,
             mid_sup=reading.mid_sup,
-            units_used=units_used or 0,
+            units_used=(reading.units_used if units_used is None else units_used) or 0,
             rate=reading.rate or 0,
             reading_date=current_date,
             prev_date=reading.prev_date,
@@ -106,26 +123,18 @@ def create_reading_history_with_values(reading, prev_user, prev_sup, cur_user, c
             version=getattr(reading, 'version', 1)
         )
     except Exception as e:
-        print(f"Error creating reading history with values: {e}")
+        print(f"Error creating reading history: {e}")
 
-def create_payment_history(billing, amount, previous_balance, 
-                          payment_method='CASH', recorded_by="system", 
-                          role="system", notes=None):
-    """Create a payment history record with corrected math"""
+
+def create_payment_history(billing, amount, previous_balance,
+                            payment_method='CASH', recorded_by="system",
+                            role="system", notes=None):
+    """Create a payment history record and return its generated receipt number."""
     try:
         receipt_number = f"RCP-{datetime.now().strftime('%Y%m%d')}-{billing.id}-{secrets.token_hex(4).upper()}"
-        
-        # Calculate current balance correctly
-        # previous_balance = bal from Billings (total amount owed)
-        # current_balance = previous_balance - amount_paid
         current_balance = previous_balance - amount
-        
-        # Determine payment status
-        if amount >= previous_balance:
-            status = 'COMPLETED'
-        else:
-            status = 'PARTIAL'
-        
+        payment_status = 'COMPLETED' if amount >= previous_balance else 'PARTIAL'
+
         PaymentHistory.objects.create(
             billing_id=billing.id,
             user_id=billing.user_id,
@@ -134,11 +143,11 @@ def create_payment_history(billing, amount, previous_balance,
             grp=billing.grp,
             parent=billing.parent,
             amount_paid=amount,
-            previous_balance=previous_balance,  # This is the bal from Billings
-            current_balance=current_balance,    # previous_balance - amount_paid
+            previous_balance=previous_balance,
+            current_balance=current_balance,
             bill_amount=billing.bill,
             payment_method=payment_method,
-            status=status,
+            status=payment_status,
             receipt_number=receipt_number,
             notes=notes,
             recorded_by=recorded_by,
@@ -149,8 +158,9 @@ def create_payment_history(billing, amount, previous_balance,
         print(f"Error creating payment history: {e}")
         return None
 
+
 def create_billing_history(billing, cycle_month, generated_by="system", role="system"):
-    """Create a billing history record"""
+    """Snapshot a Billings row into BillingHistory before it gets overwritten."""
     try:
         BillingHistory.objects.create(
             billing_id=billing.id,
@@ -179,105 +189,66 @@ def create_billing_history(billing, cycle_month, generated_by="system", role="sy
     except Exception as e:
         print(f"Error creating billing history: {e}")
 
+
 def update_customer_summary(user_id):
-    """Update the customer payment summary"""
+    """Recompute and persist the CustomerPaymentSummary row for a customer."""
     try:
         billing = Billings.objects.filter(user_id=user_id).first()
-        if billing:
-            summary, created = CustomerPaymentSummary.objects.get_or_create(
-                user_id=user_id,
-                defaults={
-                    'name': billing.name,
-                    'phone': billing.phone,
-                    'metre_num': billing.sms_name,
-                    'grp': billing.grp,
-                    'parent': billing.parent,
-                }
-            )
-            # Update summary with aggregated data
-            total_billed = Billings.objects.filter(user_id=user_id).aggregate(
-                Sum('bill')
-            )['bill__sum'] or 0
-            
-            total_paid = Billings.objects.filter(user_id=user_id).aggregate(
-                Sum('paid')
-            )['paid__sum'] or 0
-            
-            summary.total_billed = total_billed
-            summary.total_paid = total_paid
-            summary.current_balance = billing.bal
-            
-            # Update last payment info
-            last_payment = PaymentHistory.objects.filter(
-                user_id=user_id,
-                status='COMPLETED'
-            ).order_by('-timestamp').first()
-            
-            if last_payment:
-                summary.last_payment_date = last_payment.payment_date
-                summary.last_payment_amount = last_payment.amount_paid
-                summary.payment_count = PaymentHistory.objects.filter(
-                    user_id=user_id,
-                    status='COMPLETED'
-                ).count()
-            
-            # Update status
-            if billing.bal <= 0:
-                summary.payment_status = 'PAID'
-            elif billing.bal > 0 and billing.bal < 1000:
-                summary.payment_status = 'CURRENT'
-            elif billing.bal >= 1000 and billing.bal < 5000:
-                summary.payment_status = 'OVERDUE'
-            else:
-                summary.payment_status = 'DELINQUENT'
-            
-            summary.save()
+        if not billing:
+            return
+
+        summary, _ = CustomerPaymentSummary.objects.get_or_create(
+            user_id=user_id,
+            defaults={
+                'name': billing.name,
+                'phone': billing.phone,
+                'metre_num': billing.sms_name,
+                'grp': billing.grp,
+                'parent': billing.parent,
+            }
+        )
+
+        totals = Billings.objects.filter(user_id=user_id).aggregate(
+            total_billed=Sum('bill'), total_paid=Sum('paid')
+        )
+        summary.total_billed = totals['total_billed'] or 0
+        summary.total_paid = totals['total_paid'] or 0
+        summary.current_balance = billing.bal
+
+        last_payment = PaymentHistory.objects.filter(
+            user_id=user_id, status='COMPLETED'
+        ).order_by('-timestamp').first()
+
+        if last_payment:
+            summary.last_payment_date = last_payment.payment_date
+            summary.last_payment_amount = last_payment.amount_paid
+            summary.payment_count = PaymentHistory.objects.filter(
+                user_id=user_id, status='COMPLETED'
+            ).count()
+
+        if billing.bal <= 0:
+            summary.payment_status = 'PAID'
+        elif billing.bal < 1000:
+            summary.payment_status = 'CURRENT'
+        elif billing.bal < 5000:
+            summary.payment_status = 'OVERDUE'
+        else:
+            summary.payment_status = 'DELINQUENT'
+
+        summary.save()
     except Exception as e:
         print(f"Error updating customer summary: {e}")
 
-def create_audit_trail(username, role, action, table_name=None, record_id=None,
-                       field_changed=None, old_value=None, new_value=None,
-                       description=None, request=None):
-    """Create an audit trail entry"""
-    try:
-        ip_address = None
-        user_agent = None
-        session_id = None
-        
-        if request:
-            ip_address = request.META.get('REMOTE_ADDR')
-            user_agent = request.META.get('HTTP_USER_AGENT')
-            session_id = request.session.session_key
-        
-        AuditTrail.objects.create(
-            username=username,
-            role=role,
-            action=action,
-            table_name=table_name,
-            record_id=record_id,
-            field_changed=field_changed,
-            old_value=old_value,
-            new_value=new_value,
-            description=description or f"{action} performed by {username}",
-            ip_address=ip_address,
-            user_agent=user_agent,
-            session_id=session_id
-        )
-    except Exception as e:
-        print(f"Error creating audit trail: {e}")
 
 def update_reading_field(reading, field_name, new_value, username="system", role="system"):
-    """
-    Safely updates a field AND logs history automatically
-    """
+    """Set a field on a (not-yet-saved) reading instance while logging the change."""
     old_value = (
         readings.objects
         .filter(id=reading.id)
         .values_list(field_name, flat=True)
         .first()
     )
-    
-    # only log if something actually changes
+
     if old_value != new_value:
         history.objects.create(
             name=reading.name,
@@ -286,32 +257,148 @@ def update_reading_field(reading, field_name, new_value, username="system", role
             new_val=new_value if new_value is not None else 0
         )
         create_log(
-            username=username,
-            role=role,
-            action="UPDATE",
-            table="readings",
-            record_id=reading.id,
-            field_changed=field_name,
-            old_val=old_value,
-            new_val=new_value,
+            username=username, role=role, action="UPDATE", table="readings",
+            record_id=reading.id, field_changed=field_name,
+            old_val=old_value, new_val=new_value,
             description=f"{field_name} updated for {reading.name}"
         )
         create_audit_trail(
-            username=username,
-            role=role,
-            action="UPDATE",
-            table_name="readings",
-            record_id=reading.id,
-            field_changed=field_name,
-            old_value=old_value,
-            new_value=new_value,
+            username=username, role=role, action="UPDATE", table_name="readings",
+            record_id=reading.id, field_changed=field_name,
+            old_value=old_value, new_value=new_value,
             description=f"{field_name} updated for {reading.name}"
         )
-    
+
     setattr(reading, field_name, new_value)
 
+
 #======================================================================================
-# EXISTING GLOBALS AND HELPERS
+# BILLING / PAYMENT HELPERS
+#======================================================================================
+
+def current_cycle_month():
+    return timezone.now().strftime("%Y-%m")
+
+
+def compute_billing_status(paid, total_due):
+    """Shared Unpaid / Partially Paid / Paid classification."""
+    if paid == 0:
+        return "Unpaid"
+    elif paid < total_due:
+        return "Partially Paid"
+    return "Paid"
+
+
+def compute_bill_amount(units_used, rate, zero_threshold=0, flat_fee=300):
+    """Metered bill (units * rate), or a flat fee when usage is at/below the threshold."""
+    units_used = units_used or 0
+    if units_used <= zero_threshold:
+        return flat_fee
+    return units_used * rate
+
+
+def apply_new_billing_cycle(reading, bill_amount, recorded_by="system", role="system"):
+    """
+    Create or refresh the Billings record for a reading after a new reading
+    has been recorded: brings down the previous balance, resets paid/penalty
+    for the new cycle, snapshots BillingHistory, and refreshes the customer
+    summary. Returns the saved Billings instance.
+    """
+    old_billing = Billings.objects.filter(user_id=reading.user_id).first()
+    previous_balance = old_billing.bal if old_billing else Decimal("0")
+    total_balance = previous_balance + Decimal(str(bill_amount))
+    cycle_month = current_cycle_month()
+
+    if old_billing:
+        create_billing_history(old_billing, cycle_month, recorded_by, role)
+        billing = old_billing
+    else:
+        billing = Billings(user_id=reading.user_id)
+
+    billing.name = reading.name
+    billing.phone = reading.phone
+    billing.units_used = reading.units_used
+    billing.rate = reading.rate
+    billing.bill = bill_amount
+    billing.b_cd = previous_balance
+    billing.penalty = 0  # reset penalty/discount for the new cycle
+    billing.bal = total_balance
+    billing.paid = 0
+    billing.status = "Unpaid"
+    billing.prev_user = reading.prev_user
+    billing.cur_user = reading.cur_user
+    billing.sms_name = reading.metre_num
+    billing.grp = reading.grp
+    billing.parent = reading.parent
+    billing.save()
+
+    if not old_billing:
+        create_billing_history(billing, cycle_month, recorded_by, role)
+
+    update_customer_summary(reading.user_id)
+    return billing
+
+
+def apply_payment(billing, new_paid, previous_balance, payment_method,
+                   username="system", role="system", notes=None):
+    """
+    Shared payment-processing logic: writes a PaymentHistory row for any
+    increase in the amount paid, then recalculates paid/bal/status on the
+    Billings record and refreshes the customer summary.
+
+    Returns (receipt_number, old_paid, total_due).
+    """
+    old_paid = billing.paid
+    amount = new_paid - old_paid
+    receipt = None
+
+    if amount > 0:
+        receipt = create_payment_history(
+            billing=billing,
+            amount=amount,
+            previous_balance=previous_balance,
+            payment_method=payment_method,
+            recorded_by=username,
+            role=role,
+            notes=notes
+        )
+
+    billing.paid = new_paid
+    penalty = billing.penalty or Decimal("0")
+    total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
+    billing.bal = total_due - new_paid
+    billing.status = compute_billing_status(new_paid, total_due)
+    billing.save()
+
+    update_customer_summary(billing.user_id)
+    return receipt, old_paid, total_due
+
+
+#======================================================================================
+# CYCLE / DATE HELPERS
+#======================================================================================
+
+def last_day_of_month(year, month):
+    return date(year, month, calendar.monthrange(year, month)[1])
+
+
+def get_next_cycle_date(current_date):
+    """Given any date, return the last day of the following month."""
+    next_month = current_date.month + 1
+    next_year = current_date.year
+    if next_month > 12:
+        next_month = 1
+        next_year += 1
+    return last_day_of_month(next_year, next_month)
+
+
+def snapshot_readings():
+    global LAST_STATE_SNAPSHOT
+    LAST_STATE_SNAPSHOT = list(readings.objects.values())
+
+
+#======================================================================================
+# GLOBAL STATE
 #======================================================================================
 
 CYCLE_SCHEDULER = {
@@ -320,46 +407,8 @@ CYCLE_SCHEDULER = {
 BILLING_STATE = {
     "start_month": None,
 }
-CYCLE_CONFIG = {
-    "start_date": None,
-    "delay_days": 30,
-}
-BILLING_CYCLE = {
-    "start_month": 5,
-    "start_year": 2026,
-    "shift_days": 0
-}
 LAST_STATE_SNAPSHOT = None
 
-def last_day_of_month(year, month):
-    last_day = calendar.monthrange(year, month)[1]
-    return date(year, month, last_day)
-
-def create_log(username, role, action, table, record_id, description,
-               field_changed=None, old_val=None, new_val=None):
-    Logs.objects.create(
-        username=username,
-        role=role,
-        action=action,
-        table_name=table,
-        record_id=record_id,
-        field_changed=field_changed,
-        old_val=str(old_val) if old_val is not None else None,
-        new_val=str(new_val) if new_val is not None else None,
-        description=description
-    )
-
-def create_hist(name, field, old_val, new_val):
-    history.objects.create(
-        name=name,
-        field=field,
-        old_val=old_val,
-        new_val=new_val
-    )
-
-def snapshot_readings():
-    global LAST_STATE_SNAPSHOT
-    LAST_STATE_SNAPSHOT = list(readings.objects.values())
 
 #======================================================================================
 # CYCLE MANAGEMENT ENDPOINTS
@@ -371,11 +420,12 @@ def set_cycle_duration(request):
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
         data = json.loads(request.body)
-        days = int(data.get("days", 0))
-        hours = int(data.get("hours", 0))
-        minutes = int(data.get("minutes", 0))
-        seconds = int(data.get("seconds", 0))
-        delta = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+        delta = timedelta(
+            days=int(data.get("days", 0)),
+            hours=int(data.get("hours", 0)),
+            minutes=int(data.get("minutes", 0)),
+            seconds=int(data.get("seconds", 0)),
+        )
         end_time = timezone.now() + delta
         CYCLE_SCHEDULER["end_time"] = end_time
         return JsonResponse({
@@ -385,22 +435,16 @@ def set_cycle_duration(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 def cycle_timer_status(request):
     now = timezone.now()
     if not CYCLE_SCHEDULER["end_time"]:
-        return JsonResponse({
-            "running": False,
-            "days": 0,
-            "hours": 0,
-            "minutes": 0,
-            "seconds": 0
-        })
+        return JsonResponse({"running": False, "days": 0, "hours": 0, "minutes": 0, "seconds": 0})
+
     diff = CYCLE_SCHEDULER["end_time"] - now
     if diff.total_seconds() <= 0:
-        return JsonResponse({
-            "running": False,
-            "expired": True
-        })
+        return JsonResponse({"running": False, "expired": True})
+
     return JsonResponse({
         "running": True,
         "days": diff.days,
@@ -409,6 +453,7 @@ def cycle_timer_status(request):
         "seconds": diff.seconds % 60
     })
 
+
 @csrf_exempt
 def auto_shift_if_due(request):
     now = timezone.now()
@@ -416,22 +461,14 @@ def auto_shift_if_due(request):
         return JsonResponse({"message": "No cycle running"})
     if now < CYCLE_SCHEDULER["end_time"]:
         return JsonResponse({"message": "Not yet time"})
-    
+
     CYCLE_SCHEDULER["end_time"] = None
-    
+    next_cycle_date = get_next_cycle_date(now.date())
+
     with transaction.atomic():
-        next_month = now.month + 1
-        next_year = now.year
-        if next_month > 12:
-            next_month = 1
-            next_year += 1
-        next_last_day = calendar.monthrange(next_year, next_month)[1]
-        next_cycle_date = date(next_year, next_month, next_last_day)
-        
         for r in readings.objects.all():
-            # Create history before shifting with current date
             create_reading_history(r, "system", "system")
-            
+
             r.prev_user = r.cur_user if r.cur_user is not None else r.prev_user
             r.prev_sup = r.cur_sup if r.cur_sup is not None else r.prev_sup
             r.prev_date = r.cur_date or r.prev_date
@@ -439,11 +476,12 @@ def auto_shift_if_due(request):
             r.cur_user = None
             r.cur_sup = None
             r.save()
-    
+
     return JsonResponse({
         "message": "Auto shift completed",
         "next_cycle_date": str(next_cycle_date)
     })
+
 
 @csrf_exempt
 def start_billing_month(request):
@@ -454,26 +492,14 @@ def start_billing_month(request):
         start_month = data.get("start_month")
         if not start_month:
             return JsonResponse({"error": "start_month required"}, status=400)
-        
+
         year, month = map(int, start_month.split("-"))
-        last_day = calendar.monthrange(year, month)[1]
-        prev_date = date(year, month, last_day)
-        
-        next_month = month + 1
-        next_year = year
-        if next_month > 12:
-            next_month = 1
-            next_year += 1
-        next_last_day = calendar.monthrange(next_year, next_month)[1]
-        cur_date = date(next_year, next_month, next_last_day)
-        
+        prev_date = last_day_of_month(year, month)
+        cur_date = get_next_cycle_date(prev_date)
+
         with transaction.atomic():
-            readings.objects.all().update(
-                prev_date=prev_date,
-                cur_date=cur_date
-            )
-            
-            # Create billing cycle record
+            readings.objects.all().update(prev_date=prev_date, cur_date=cur_date)
+
             BillingCycleHistory.objects.create(
                 cycle_month=start_month,
                 start_date=prev_date,
@@ -482,7 +508,7 @@ def start_billing_month(request):
                 status='IN_PROGRESS',
                 started_by=data.get("username", "system")
             )
-        
+
         BILLING_STATE["start_month"] = start_month
         return JsonResponse({
             "message": "Billing month started",
@@ -492,26 +518,20 @@ def start_billing_month(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
 # FETCH ENDPOINTS
 #======================================================================================
 
 def water_users(request):
-    users = read_users.objects.all()
-    data = []
-    for u in users:
-        data.append({
-            'id': u.id,
-            'fname': u.fname,
-            'phone': u.phone,
-            'metre_num': u.metre_num,
-            'zone': u.zone,
-            'rate': u.rate,
-            'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None,
-            'grp': u.grp,
-            'parent': u.parent
-        })
+    data = [{
+        'id': u.id, 'fname': u.fname, 'phone': u.phone, 'metre_num': u.metre_num,
+        'zone': u.zone, 'rate': u.rate,
+        'created_on': u.created_on.strftime('%Y-%m-%d') if u.created_on else None,
+        'grp': u.grp, 'parent': u.parent
+    } for u in read_users.objects.all()]
     return JsonResponse(data, safe=False)
+
 
 def hist_data(request):
     name = request.GET.get("name")
@@ -521,100 +541,64 @@ def hist_data(request):
         hist = hist.filter(name__icontains=name)
     if field:
         hist = hist.filter(field__icontains=field)
-    data = []
-    for h in hist:
-        data.append({
-            'id': h.id,
-            'name': h.name,
-            'field': h.field,
-            'old_val': h.old_val,
-            'new_val': h.new_val,
-            'changes_on': h.changed_on.strftime('%Y-%m-%d') if h.changed_on else None
-        })
+
+    data = [{
+        'id': h.id, 'name': h.name, 'field': h.field,
+        'old_val': h.old_val, 'new_val': h.new_val,
+        'changes_on': h.changed_on.strftime('%Y-%m-%d') if h.changed_on else None
+    } for h in hist]
     return JsonResponse(data, safe=False)
+
 
 def bill(request):
-    bills = Billings.objects.all()
-    data = []
-    for b in bills:
-        data.append({
-            'id': b.id,
-            'user_id': b.user_id,
-            'name': b.name,
-            'phone': b.phone,
-            'units_used': b.units_used,
-            'rate': b.rate,
-            'bill': b.bill,
-            'paid': b.paid,
-            'bal': b.bal,
-            'status': b.status,
-            'b_cd': b.b_cd,
-            'penalty': float(b.penalty) if b.penalty is not None else 0,
-            'prev_user': b.prev_user,
-            'cur_user': b.cur_user,
-            'sms_name': b.sms_name,
-            'grp': b.grp,
-            'parent': b.parent
-        })
+    data = [{
+        'id': b.id, 'user_id': b.user_id, 'name': b.name, 'phone': b.phone,
+        'units_used': b.units_used, 'rate': b.rate, 'bill': b.bill, 'paid': b.paid,
+        'bal': b.bal, 'status': b.status, 'b_cd': b.b_cd,
+        'penalty': float(b.penalty) if b.penalty is not None else 0,
+        'prev_user': b.prev_user, 'cur_user': b.cur_user, 'sms_name': b.sms_name,
+        'grp': b.grp, 'parent': b.parent
+    } for b in Billings.objects.all()]
     return JsonResponse(data, safe=False)
+
 
 def logs(request):
-    log = Logs.objects.all().order_by('-changed_at')
-    data = []
-    for l in log:
-        data.append({
-            'id': l.id,
-            'username': l.username,
-            'role': l.role,
-            'action': l.action,
-            'table_name': l.table_name,
-            'record_id': l.record_id,
-            'field_changed': l.field_changed,
-            'old_val': l.old_val,
-            'new_val': l.new_val,
-            'description': l.description,
-            'changed_at': l.changed_at.strftime('%Y-%m-%d %H:%M:%S') if l.changed_at else None
-        })
+    data = [{
+        'id': l.id, 'username': l.username, 'role': l.role, 'action': l.action,
+        'table_name': l.table_name, 'record_id': l.record_id,
+        'field_changed': l.field_changed, 'old_val': l.old_val, 'new_val': l.new_val,
+        'description': l.description,
+        'changed_at': l.changed_at.strftime('%Y-%m-%d %H:%M:%S') if l.changed_at else None
+    } for l in Logs.objects.all().order_by('-changed_at')]
     return JsonResponse(data, safe=False)
+
 
 def read_data(request):
-    read = readings.objects.all()
-    data = []
-    for r in read:
-        data.append({
-            'id': r.id,
-            'user_id': r.user_id,
-            'name': r.name,
-            'phone': r.phone,
-            'metre_num': r.metre_num,
-            'prev_user': r.prev_user,
-            'prev_sup': r.prev_sup,
-            'prev_date': r.prev_date.strftime('%Y-%m-%d') if r.prev_date else None,
-            'cur_user': r.cur_user,
-            'cur_sup': r.cur_sup,
-            'cur_date': r.cur_date.strftime('%Y-%m-%d') if r.cur_date else None,
-            'rate': r.rate,
-            'mid_user': r.mid_user,
-            'mid_sup': r.mid_sup,
-            'grp': r.grp,
-            'parent': r.parent
-        })
+    data = [{
+        'id': r.id, 'user_id': r.user_id, 'name': r.name, 'phone': r.phone,
+        'metre_num': r.metre_num, 'prev_user': r.prev_user, 'prev_sup': r.prev_sup,
+        'prev_date': r.prev_date.strftime('%Y-%m-%d') if r.prev_date else None,
+        'cur_user': r.cur_user, 'cur_sup': r.cur_sup,
+        'cur_date': r.cur_date.strftime('%Y-%m-%d') if r.cur_date else None,
+        'rate': r.rate, 'mid_user': r.mid_user, 'mid_sup': r.mid_sup,
+        'grp': r.grp, 'parent': r.parent
+    } for r in readings.objects.all()]
     return JsonResponse(data, safe=False)
 
+
 #======================================================================================
-# NEW HISTORY FETCH ENDPOINTS
+# HISTORY FETCH ENDPOINTS (LIGHTWEIGHT / FILTERED)
 #======================================================================================
 
 @api_view(['GET'])
 def get_reading_history(request):
-    """Get reading history with filters"""
+    """Get reading history with filters (lightweight field set)."""
     user_id = request.GET.get('user_id')
     cycle_month = request.GET.get('cycle_month')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
-    
+
     history_qs = ReadingHistory.objects.all()
-    
     if user_id:
         history_qs = history_qs.filter(user_id=user_id)
     if cycle_month:
@@ -623,29 +607,29 @@ def get_reading_history(request):
         history_qs = history_qs.filter(timestamp__date__gte=start_date)
     if end_date:
         history_qs = history_qs.filter(timestamp__date__lte=end_date)
-    
+
     data = list(history_qs.values(
-        'id', 'name', 'phone', 'prev_user', 'cur_user', 
+        'id', 'name', 'phone', 'prev_user', 'cur_user',
         'units_used', 'cycle_month', 'timestamp', 'recorded_by', 'reading_date'
     ))
     return Response(data)
 
+
 @api_view(['GET'])
 def get_payment_history(request):
-    """Get payment history with filters"""
+    """Get payment history with filters (lightweight field set)."""
     user_id = request.GET.get('user_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
-    
+
     history_qs = PaymentHistory.objects.all()
-    
     if user_id:
         history_qs = history_qs.filter(user_id=user_id)
     if start_date:
         history_qs = history_qs.filter(payment_date__gte=start_date)
     if end_date:
         history_qs = history_qs.filter(payment_date__lte=end_date)
-    
+
     data = list(history_qs.values(
         'id', 'name', 'phone', 'amount_paid', 'previous_balance',
         'current_balance', 'payment_method', 'receipt_number',
@@ -653,22 +637,22 @@ def get_payment_history(request):
     ))
     return Response(data)
 
+
 @api_view(['GET'])
 def get_billing_history(request):
-    """Get billing history with filters"""
+    """Get billing history with filters."""
     user_id = request.GET.get('user_id')
     cycle_month = request.GET.get('cycle_month')
-    status = request.GET.get('status')
-    
+    status_filter = request.GET.get('status')
+
     history_qs = BillingHistory.objects.all()
-    
     if user_id:
         history_qs = history_qs.filter(user_id=user_id)
     if cycle_month:
         history_qs = history_qs.filter(cycle_month=cycle_month)
-    if status:
-        history_qs = history_qs.filter(status=status)
-    
+    if status_filter:
+        history_qs = history_qs.filter(status=status_filter)
+
     data = list(history_qs.values(
         'id', 'name', 'phone', 'units_used', 'current_bill',
         'total_due', 'amount_paid', 'remaining_balance',
@@ -676,24 +660,24 @@ def get_billing_history(request):
     ))
     return Response(data)
 
+
 @api_view(['GET'])
 def get_customer_history(request, user_id):
-    """Get complete history for a customer"""
+    """Get complete (reading + payment + billing) history for one customer."""
     try:
-        reading_history = ReadingHistory.objects.filter(
-            user_id=user_id
-        ).values('timestamp', 'cur_user', 'prev_user', 'units_used', 'cycle_month', 'recorded_by', 'reading_date')
-        
-        payment_history = PaymentHistory.objects.filter(
-            user_id=user_id
-        ).values('timestamp', 'amount_paid', 'previous_balance', 
-                'current_balance', 'payment_method', 'receipt_number', 'payment_date')
-        
-        billing_history = BillingHistory.objects.filter(
-            user_id=user_id
-        ).values('cycle_month', 'current_bill', 'total_due', 'amount_paid', 
-                'remaining_balance', 'status')
-        
+        reading_history = ReadingHistory.objects.filter(user_id=user_id).values(
+            'timestamp', 'cur_user', 'prev_user', 'units_used',
+            'cycle_month', 'recorded_by', 'reading_date'
+        )
+        payment_history = PaymentHistory.objects.filter(user_id=user_id).values(
+            'timestamp', 'amount_paid', 'previous_balance',
+            'current_balance', 'payment_method', 'receipt_number', 'payment_date'
+        )
+        billing_history = BillingHistory.objects.filter(user_id=user_id).values(
+            'cycle_month', 'current_bill', 'total_due', 'amount_paid',
+            'remaining_balance', 'status'
+        )
+
         return Response({
             'user_id': user_id,
             'reading_history': reading_history,
@@ -702,6 +686,7 @@ def get_customer_history(request, user_id):
         })
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 #======================================================================================
 # AUTHENTICATION
@@ -713,30 +698,22 @@ def login_user(request):
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
         data = json.loads(request.body)
-        username = data.get("username")
-        password = data.get("password")
-        admin = Admin.objects.filter(username=username, password=password).first()
-        if admin:
-            token = secrets.token_hex(32)
-            create_log(
-                username="admin",
-                role="admin",
-                action="LOGIN",
-                table="admin",
-                record_id=admin.id,
-                description="Admin logged into system"
-            )
-            create_audit_trail(
-                username="admin",
-                role="admin",
-                action="LOGIN",
-                description="Admin logged into system",
-                request=request
-            )
-            return JsonResponse({"token": token})
-        return JsonResponse({"error": "Invalid login credentials"}, status=401)
+        admin = Admin.objects.filter(
+            username=data.get("username"), password=data.get("password")
+        ).first()
+        if not admin:
+            return JsonResponse({"error": "Invalid login credentials"}, status=401)
+
+        token = secrets.token_hex(32)
+        create_log("admin", "admin", "LOGIN", "admin", admin.id, "Admin logged into system")
+        create_audit_trail(
+            username="admin", role="admin", action="LOGIN",
+            description="Admin logged into system", request=request
+        )
+        return JsonResponse({"token": token})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def users_login(request):
@@ -745,34 +722,22 @@ def users_login(request):
     try:
         data = json.loads(request.body)
         user = Users.objects.filter(
-            username=data.get("username"),
-            password=data.get("password")
+            username=data.get("username"), password=data.get("password")
         ).first()
         if not user:
             return JsonResponse({"error": "Invalid credentials"}, status=401)
+
         token = secrets.token_hex(16)
-        create_log(
-            user.username,
-            user.role,
-            "LOGIN",
-            "users",
-            user.id,
-            f"{user.username} logged into system"
-        )
+        create_log(user.username, user.role, "LOGIN", "users", user.id,
+                   f"{user.username} logged into system")
         create_audit_trail(
-            username=user.username,
-            role=user.role,
-            action="LOGIN",
-            description=f"{user.username} logged into system",
-            request=request
+            username=user.username, role=user.role, action="LOGIN",
+            description=f"{user.username} logged into system", request=request
         )
-        return JsonResponse({
-            "token": token,
-            "username": user.username,
-            "role": user.role
-        })
+        return JsonResponse({"token": token, "username": user.username, "role": user.role})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 #======================================================================================
 # USER MANAGEMENT
@@ -793,62 +758,39 @@ def new_user(request):
         parent = data.get("parent")
         user_name = data.get("username")
         role = data.get("role")
-        
+
         if not all([fname, phone, metre_num, zone, rate]):
             return JsonResponse({"error": "Missing fields"}, status=400)
-        
+
         with transaction.atomic():
             user = read_users.objects.create(
-                fname=fname,
-                phone=phone,
-                metre_num=metre_num,
-                zone=zone,
-                rate=rate,
-                grp=grp,
-                parent=parent
+                fname=fname, phone=phone, metre_num=metre_num,
+                zone=zone, rate=rate, grp=grp, parent=parent
             )
             today = date.today()
             reading = readings.objects.create(
-                user=user,
-                name=fname,
-                phone=phone,
-                prev_user=0,
-                prev_sup=0,
-                prev_date=today,
-                cur_user=None,
-                cur_sup=None,
-                cur_date=today,
-                units_used=0,
-                rate=rate,
-                metre_num=metre_num,
-                grp=grp,
-                parent=parent
+                user=user, name=fname, phone=phone,
+                prev_user=0, prev_sup=0, prev_date=today,
+                cur_user=None, cur_sup=None, cur_date=today,
+                units_used=0, rate=rate, metre_num=metre_num,
+                grp=grp, parent=parent
             )
-            
-            # Create initial reading history with current date
+
             create_reading_history(reading, user_name, role)
-            
-            create_log(
-                username=user_name,
-                role=role,
-                action="CREATE",
-                table="waterusers",
-                record_id=user.id,
-                description=f"{user_name} created new customer {fname}"
-            )
+
+            create_log(user_name, role, "CREATE", "waterusers", user.id,
+                       f"{user_name} created new customer {fname}")
             create_audit_trail(
-                username=user_name,
-                role=role,
-                action="CREATE",
-                table_name="waterusers",
-                record_id=user.id,
+                username=user_name, role=role, action="CREATE",
+                table_name="waterusers", record_id=user.id,
                 description=f"{user_name} created new customer {fname}",
                 request=request
             )
-        
+
         return JsonResponse({"message": "User registered successfully"})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def update_user(request, user_id):
@@ -865,27 +807,19 @@ def update_user(request, user_id):
         parent = data.get("parent")
         user_name = data.get("username", "Unknown")
         role = data.get("role", "Unknown")
-        
+
         with transaction.atomic():
             try:
                 user = read_users.objects.get(id=user_id)
             except read_users.DoesNotExist:
                 return JsonResponse({"error": "User not found"}, status=404)
-            
+
             old_name = user.fname
-            old_phone = user.phone
-            
-            # Store old user data for audit
             old_data = {
-                'fname': user.fname,
-                'phone': user.phone,
-                'metre_num': user.metre_num,
-                'zone': user.zone,
-                'rate': user.rate,
-                'grp': user.grp,
-                'parent': user.parent
+                'fname': user.fname, 'phone': user.phone, 'metre_num': user.metre_num,
+                'zone': user.zone, 'rate': user.rate, 'grp': user.grp, 'parent': user.parent
             }
-            
+
             user.fname = fname or user.fname
             user.phone = phone or user.phone
             user.metre_num = metre_num or user.metre_num
@@ -894,60 +828,36 @@ def update_user(request, user_id):
             user.grp = grp or user.grp
             user.parent = parent or user.parent
             user.save()
-            
-            # Update readings and billings
+
             readings.objects.filter(user_id=user_id).update(
-                name=fname,
-                phone=phone,
-                metre_num=metre_num,
-                rate=rate,
-                grp=grp,
-                parent=parent
+                name=fname, phone=phone, metre_num=metre_num,
+                rate=rate, grp=grp, parent=parent
             )
-            
             Billings.objects.filter(user_id=user_id).update(
-                name=fname,
-                phone=phone,
-                rate=rate,
-                sms_name=metre_num,
-                grp=grp,
-                parent=parent
+                name=fname, phone=phone, rate=rate,
+                sms_name=metre_num, grp=grp, parent=parent
             )
-            
-            # Update customer summary
+
             update_customer_summary(user_id)
-            
-            create_log(
-                username=user_name,
-                role=role,
-                action="UPDATE",
-                table="waterusers",
-                record_id=user_id,
-                description=f"{role} updated customer {old_name} → {fname}"
-            )
+
+            create_log(user_name, role, "UPDATE", "waterusers", user_id,
+                       f"{role} updated customer {old_name} → {fname}")
             create_audit_trail(
-                username=user_name,
-                role=role,
-                action="UPDATE",
-                table_name="waterusers",
-                record_id=user_id,
+                username=user_name, role=role, action="UPDATE",
+                table_name="waterusers", record_id=user_id,
                 old_value=json.dumps(old_data),
                 new_value=json.dumps({
-                    'fname': user.fname,
-                    'phone': user.phone,
-                    'metre_num': user.metre_num,
-                    'zone': user.zone,
-                    'rate': user.rate,
-                    'grp': user.grp,
-                    'parent': user.parent
+                    'fname': user.fname, 'phone': user.phone, 'metre_num': user.metre_num,
+                    'zone': user.zone, 'rate': user.rate, 'grp': user.grp, 'parent': user.parent
                 }),
                 description=f"{role} updated customer {old_name} → {fname}",
                 request=request
             )
-        
+
         return JsonResponse({"message": "User updated successfully"})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def delete_user(request, user_id):
@@ -957,54 +867,40 @@ def delete_user(request, user_id):
         data = json.loads(request.body) if request.body else {}
         user_name = data.get("username", "Unknown")
         role = data.get("role", "Unknown")
-        
+
         with transaction.atomic():
             try:
                 user = read_users.objects.get(id=user_id)
             except read_users.DoesNotExist:
                 return JsonResponse({"error": "User not found"}, status=404)
-            
+
             fname = user.fname
-            
-            # Get readings for history before deletion
-            reading_records = readings.objects.filter(user_id=user_id)
-            for r in reading_records:
+
+            for r in readings.objects.filter(user_id=user_id):
                 create_reading_history(r, user_name, role)
-            
-            # Delete records
+
             readings.objects.filter(user_id=user_id).delete()
             Billings.objects.filter(user_id=user_id).delete()
             Billings.objects.filter(name=user.fname).delete()
-            
-            # Delete customer summary
             CustomerPaymentSummary.objects.filter(user_id=user_id).delete()
-            
             user.delete()
-            
-            create_log(
-                username=user_name,
-                role=role,
-                action="DELETE",
-                table="waterusers",
-                record_id=user_id,
-                description=f"{user_name} deleted customer {fname}, readings, billings"
-            )
+
+            create_log(user_name, role, "DELETE", "waterusers", user_id,
+                       f"{user_name} deleted customer {fname}, readings, billings")
             create_audit_trail(
-                username=user_name,
-                role=role,
-                action="DELETE",
-                table_name="waterusers",
-                record_id=user_id,
+                username=user_name, role=role, action="DELETE",
+                table_name="waterusers", record_id=user_id,
                 description=f"{user_name} deleted customer {fname}",
                 request=request
             )
-        
+
         return JsonResponse({"message": "User fully deleted"})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
-# SUBMIT READINGS AND BILLING - UPDATED WITH AUTOMATION
+# SUBMIT READINGS AND BILLING
 #======================================================================================
 
 @csrf_exempt
@@ -1014,123 +910,47 @@ def submit_new_reading(request):
     try:
         data = json.loads(request.body)
         updates = data if isinstance(data, list) else [data]
-        
+
         with transaction.atomic():
             for item in updates:
                 user_name = item.get("username", "system")
                 role = item.get("role", "system")
-                reading = readings.objects.select_for_update().get(
-                    user_id=item["user_id"]
-                )
-                
-                # Store old values for history
-                old_prev_user = reading.prev_user or 0
-                old_prev_sup = reading.prev_sup or 0
-                old_cur_user = reading.cur_user or 0
-                old_cur_sup = reading.cur_sup or 0
-                old_units_used = reading.units_used or 0
-                
+                reading = readings.objects.select_for_update().get(user_id=item["user_id"])
+
                 cur_user = item.get("cur_user")
                 cur_sup = item.get("cur_sup")
-                
+
                 if cur_user is not None:
                     cur_user = int(cur_user)
                     reading.units_used = max(0, cur_user - (reading.prev_user or 0))
                     update_reading_field(reading, "cur_user", cur_user, user_name, role)
-                
+
                 if cur_sup is not None:
                     update_reading_field(reading, "cur_sup", cur_sup, user_name, role)
-                
+
                 reading.mid_user = item.get("mid_user", reading.mid_user)
                 reading.mid_sup = item.get("mid_sup", reading.mid_sup)
                 reading.save()
-                
-                # Create history with current date and updated values
+
                 create_reading_history(reading, user_name, role)
-                
-                # BILLING
-                bill_amount = reading.units_used * reading.rate
-                if reading.units_used == 0:
-                    bill_amount = 300
-                
-                old_billing = Billings.objects.filter(user_id=reading.user_id).first()
-                previous_balance = old_billing.b_cd if old_billing else Decimal("0")
-                previous_paid = Decimal("0")
-                
-                if old_billing:
-                    previous_balance = old_billing.bal or Decimal("0")
-                    previous_paid = old_billing.paid or Decimal("0")
-                
-                # NOTE: a fresh billing cycle always resets penalty/discount back to 0.
-                # Any penalty or discount only applies to the current, already-billed cycle.
-                total_balance = previous_balance + Decimal(str(bill_amount))
-                billing = Billings.objects.filter(user_id=reading.user_id).first()
-                
-                if billing:
-                    # Save billing history before update
-                    cycle_month = timezone.now().strftime("%Y-%m")
-                    create_billing_history(billing, cycle_month, user_name, role)
-                    
-                    billing.name = reading.name
-                    billing.phone = reading.phone
-                    billing.units_used = reading.units_used
-                    billing.rate = reading.rate
-                    billing.bill = bill_amount
-                    billing.b_cd = previous_balance
-                    billing.penalty = 0  # reset penalty/discount for the new cycle
-                    billing.bal = total_balance
-                    billing.paid = 0
-                    billing.status = "Unpaid"
-                    billing.prev_user = reading.prev_user
-                    billing.cur_user = reading.cur_user
-                    billing.sms_name = reading.metre_num
-                    billing.grp = reading.grp
-                    billing.parent = reading.parent
-                    billing.save()
-                    
-                    # Update customer summary
-                    update_customer_summary(reading.user_id)
-                else:
-                    billing = Billings.objects.create(
-                        user_id=reading.user_id,
-                        name=reading.name,
-                        phone=reading.phone,
-                        units_used=reading.units_used,
-                        rate=reading.rate,
-                        bill=bill_amount,
-                        b_cd=previous_balance,
-                        penalty=0,
-                        bal=total_balance,
-                        paid=0,
-                        status="Unpaid",
-                        prev_user=reading.prev_user,
-                        cur_user=reading.cur_user,
-                        sms_name=reading.metre_num,
-                        grp=reading.grp,
-                        parent=reading.parent
-                    )
-                    cycle_month = timezone.now().strftime("%Y-%m")
-                    create_billing_history(billing, cycle_month, user_name, role)
-                    
-                    # Create initial customer summary
-                    update_customer_summary(reading.user_id)
-                
+
+                bill_amount = compute_bill_amount(reading.units_used, reading.rate, zero_threshold=0)
+                apply_new_billing_cycle(reading, bill_amount, user_name, role)
+
                 create_audit_trail(
-                    username=user_name,
-                    role=role,
-                    action="UPDATE",
-                    table_name="readings",
-                    record_id=reading.id,
+                    username=user_name, role=role, action="UPDATE",
+                    table_name="readings", record_id=reading.id,
                     description=f"Reading submitted for {reading.name}",
                     request=request
                 )
-        
+
         return JsonResponse({"message": "Saved successfully"})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
-# PAYMENT UPDATES (UPDATED WITH CORRECT MATH)
+# PAYMENT UPDATES
 #======================================================================================
 
 @csrf_exempt
@@ -1139,131 +959,68 @@ def update_paid(request):
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
         data = json.loads(request.body)
-        
+
         if isinstance(data, list):
             updated = []
             with transaction.atomic():
                 for item in data:
                     billing = Billings.objects.get(id=item.get("id"))
-                    old_paid = billing.paid
                     new_paid = Decimal(str(item.get("paid", 0)))
-                    amount = new_paid - old_paid
-                    
-                    if amount > 0:
-                        # Get the previous balance (bal from Billings before this payment)
-                        # This is the total amount the customer owes
-                        previous_balance = billing.bal + amount  # bal + amount paid
-                        
-                        # Create payment history with corrected math
-                        receipt = create_payment_history(
-                            billing=billing,
-                            amount=amount,
-                            previous_balance=previous_balance,  # bal + amount
-                            payment_method='BULK',
-                            recorded_by=item.get("username", "system"),
-                            role=item.get("role", "system")
-                        )
-                    
-                    billing.paid = new_paid
-                    penalty = billing.penalty or Decimal("0")
-                    total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
-                    billing.bal = total_due - new_paid
-                    
-                    if new_paid == 0:
-                        billing.status = "Unpaid"
-                    elif new_paid < total_due:
-                        billing.status = "Partially Paid"
-                    else:
-                        billing.status = "Paid"
-                    billing.save()
-                    
-                    # Update customer summary
-                    update_customer_summary(billing.user_id)
-                    
-                    create_log(
-                        item.get("username", "system"),
-                        item.get("role", "system"),
-                        "UPDATE",
-                        "billings",
-                        billing.id,
-                        f"bulk update: {old_paid} → {new_paid}",
-                        "paid",
-                        old_paid,
-                        new_paid
+                    amount = new_paid - billing.paid
+                    # bulk uploads record the pre-payment balance as bal + amount
+                    previous_balance = billing.bal + amount if amount > 0 else billing.bal
+
+                    receipt, old_paid, _ = apply_payment(
+                        billing, new_paid, previous_balance, 'BULK',
+                        item.get("username", "system"), item.get("role", "system")
                     )
-                    
+
+                    create_log(
+                        item.get("username", "system"), item.get("role", "system"),
+                        "UPDATE", "billings", billing.id,
+                        f"bulk update: {old_paid} → {new_paid}",
+                        "paid", old_paid, new_paid
+                    )
+
                     updated.append({
-                        "id": billing.id,
-                        "paid": billing.paid,
-                        "bal": billing.bal,
-                        "status": billing.status
+                        "id": billing.id, "paid": billing.paid,
+                        "bal": billing.bal, "status": billing.status
                     })
-            
-            return JsonResponse({
-                "message": "Bulk payment updated successfully",
-                "updated": updated
-            })
+
+            return JsonResponse({"message": "Bulk payment updated successfully", "updated": updated})
+
         else:
             billing = Billings.objects.get(id=data.get("id"))
-            old_paid = billing.paid
             new_paid = Decimal(str(data.get("paid", 0)))
-            amount = new_paid - old_paid
-            
-            if amount > 0:
-                # Get the previous balance (bal from Billings before this payment)
-                previous_balance = billing.bal
-                
-                receipt = create_payment_history(
-                    billing=billing,
-                    amount=amount,
-                    previous_balance=previous_balance,
-                    payment_method=data.get("payment_method", 'CASH'),
-                    recorded_by=data.get("username", "system"),
-                    role=data.get("role", "system"),
-                    notes=data.get("notes", None)
-                )
-            
-            billing.paid = new_paid
-            penalty = billing.penalty or Decimal("0")
-            total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
-            billing.bal = total_due - new_paid
-            
-            if new_paid == 0:
-                billing.status = "Unpaid"
-            elif new_paid < total_due:
-                billing.status = "Partially Paid"
-            else:
-                billing.status = "Paid"
-            billing.save()
-            
-            # Update customer summary
-            update_customer_summary(billing.user_id)
-            
-            create_log(
-                data.get("username"),
-                data.get("role"),
-                "UPDATE",
-                "billings",
-                billing.id,
-                f"{data.get('role')} updated payment from {old_paid} to {new_paid}",
-                "paid",
-                old_paid,
-                new_paid
+            previous_balance = billing.bal
+
+            receipt, old_paid, _ = apply_payment(
+                billing, new_paid, previous_balance,
+                data.get("payment_method", 'CASH'),
+                data.get("username", "system"), data.get("role", "system"),
+                notes=data.get("notes")
             )
-            
+
+            create_log(
+                data.get("username"), data.get("role"), "UPDATE", "billings", billing.id,
+                f"{data.get('role')} updated payment from {old_paid} to {new_paid}",
+                "paid", old_paid, new_paid
+            )
+
             return JsonResponse({
                 "message": "Payment updated",
                 "id": billing.id,
                 "paid": billing.paid,
                 "bal": billing.bal,
                 "status": billing.status,
-                "receipt_number": receipt if amount > 0 else None
+                "receipt_number": receipt
             })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
-# PENALTY / DISCOUNT MANAGEMENT (NEW)
+# PENALTY / DISCOUNT MANAGEMENT
 #======================================================================================
 
 @csrf_exempt
@@ -1282,9 +1039,7 @@ def update_billing_penalty(request):
 
     Storage rule: penalty column holds a POSITIVE number for a penalty and a
     NEGATIVE number for a discount. "reset" sets it back to 0.
-
-    bal (amount to pay) is always recalculated as:
-        bal = bill + b_cd + penalty - paid
+    bal (amount to pay) is always recalculated as: bal = bill + b_cd + penalty - paid
     """
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
@@ -1298,10 +1053,7 @@ def update_billing_penalty(request):
         if not billing_id:
             return JsonResponse({"error": "Billing id is required"}, status=400)
         if action_type not in ("penalty", "discount", "reset"):
-            return JsonResponse(
-                {"error": "type must be 'penalty', 'discount' or 'reset'"},
-                status=400
-            )
+            return JsonResponse({"error": "type must be 'penalty', 'discount' or 'reset'"}, status=400)
 
         with transaction.atomic():
             try:
@@ -1315,13 +1067,11 @@ def update_billing_penalty(request):
                 new_penalty = Decimal("0")
                 label = "Removed penalty/discount"
             else:
-                raw_amount = data.get("amount", 0)
                 try:
-                    amount = Decimal(str(raw_amount))
+                    amount = Decimal(str(data.get("amount", 0)))
                 except Exception:
                     return JsonResponse({"error": "Invalid amount"}, status=400)
-                if amount < 0:
-                    amount = -amount  # amount is always entered as a positive number
+                amount = abs(amount)  # amount is always entered as a positive number
 
                 if action_type == "penalty":
                     new_penalty = amount
@@ -1331,45 +1081,25 @@ def update_billing_penalty(request):
                     label = f"Added discount of {amount}"
 
             billing.penalty = new_penalty
-
             paid = billing.paid or Decimal("0")
             total_due = (billing.bill or 0) + (billing.b_cd or 0) + new_penalty
             billing.bal = total_due - paid
-
-            if paid == 0:
-                billing.status = "Unpaid"
-            elif paid < total_due:
-                billing.status = "Partially Paid"
-            else:
-                billing.status = "Paid"
-
+            billing.status = compute_billing_status(paid, total_due)
             billing.save()
 
-            # Update customer summary to reflect the new balance
             update_customer_summary(billing.user_id)
 
             create_log(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_val=old_penalty,
-                new_val=new_penalty,
+                username=username, role=role, action="UPDATE", table="billings",
+                record_id=billing.id, field_changed="penalty",
+                old_val=old_penalty, new_val=new_penalty,
                 description=f"{label} for {billing.name}"
             )
             create_audit_trail(
-                username=username,
-                role=role,
-                action="UPDATE",
-                table_name="billings",
-                record_id=billing.id,
-                field_changed="penalty",
-                old_value=str(old_penalty),
-                new_value=str(new_penalty),
-                description=f"{label} for {billing.name}",
-                request=request
+                username=username, role=role, action="UPDATE", table_name="billings",
+                record_id=billing.id, field_changed="penalty",
+                old_value=str(old_penalty), new_value=str(new_penalty),
+                description=f"{label} for {billing.name}", request=request
             )
 
         return JsonResponse({
@@ -1385,6 +1115,7 @@ def update_billing_penalty(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
 # MONTH FINALIZATION
 #======================================================================================
@@ -1397,45 +1128,35 @@ def finalize_month(request):
         data = json.loads(request.body) if request.body else {}
         username = data.get("username", "system")
         role = data.get("role", "system")
-        
+
         today = datetime.now()
         last_day = calendar.monthrange(today.year, today.month)[1]
         cycle_end = datetime(today.year, today.month, last_day, 23, 59, 59)
-        
+
         if today < cycle_end:
-            return JsonResponse({
-                "error": "Cycle not finished yet"
-            }, status=400)
-        
-        next_month = today.month + 1
-        next_year = today.year
-        if next_month > 12:
-            next_month = 1
-            next_year += 1
-        next_last_day = calendar.monthrange(next_year, next_month)[1]
-        next_cycle_date = date(next_year, next_month, next_last_day)
-        
+            return JsonResponse({"error": "Cycle not finished yet"}, status=400)
+
+        next_cycle_date = get_next_cycle_date(today.date())
+
         with transaction.atomic():
-            # Update billing cycle status
             current_cycle = BillingCycleHistory.objects.filter(
                 cycle_month=today.strftime("%Y-%m")
             ).first()
-            
+
             if current_cycle:
                 current_cycle.status = 'COMPLETED'
                 current_cycle.completed_by = username
                 current_cycle.completed_at = timezone.now()
                 current_cycle.save()
-            
+
             for r in readings.objects.all():
-                # Create history before shift with current date
                 create_reading_history(r, username, role)
-                
+
                 if r.cur_user is not None:
                     r.prev_user = r.cur_user
                 if r.cur_sup is not None:
                     r.prev_sup = r.cur_sup
-                
+
                 r.cur_user = None
                 r.cur_sup = None
                 r.mid_user = 0
@@ -1443,8 +1164,7 @@ def finalize_month(request):
                 r.prev_date = r.cur_date or r.prev_date
                 r.cur_date = next_cycle_date
                 r.save()
-            
-            # Create next billing cycle
+
             BillingCycleHistory.objects.create(
                 cycle_month=next_cycle_date.strftime("%Y-%m"),
                 start_date=next_cycle_date,
@@ -1453,22 +1173,17 @@ def finalize_month(request):
                 status='PENDING',
                 started_by=username
             )
-            
+
             create_audit_trail(
-                username=username,
-                role=role,
-                action="SYSTEM",
-                table_name="readings",
+                username=username, role=role, action="SYSTEM", table_name="readings",
                 description=f"Month finalized for {today.strftime('%Y-%m')}",
                 request=request
             )
-        
-        return JsonResponse({
-            "message": "Cycle shifted successfully",
-            "next_cycle_date": str(next_cycle_date)
-        })
+
+        return JsonResponse({"message": "Cycle shifted successfully", "next_cycle_date": str(next_cycle_date)})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 #======================================================================================
 # EMPLOYEE MANAGEMENT
@@ -1481,39 +1196,31 @@ def register_user(request):
         password=request.data.get('password'),
         role=request.data.get('role')
     )
-    create_log(
-        "Admin",
-        "admin",
-        "CREATE",
-        "users",
-        user.id,
-        f"Admin created employee {user.username}"
-    )
+    create_log("Admin", "admin", "CREATE", "users", user.id,
+               f"Admin created employee {user.username}")
     create_audit_trail(
-        username="Admin",
-        role="admin",
-        action="CREATE",
-        table_name="users",
-        record_id=user.id,
-        description=f"Admin created employee {user.username}",
+        username="Admin", role="admin", action="CREATE", table_name="users",
+        record_id=user.id, description=f"Admin created employee {user.username}",
         request=request
     )
     return Response({"message": "User registered successfully"})
 
+
 @api_view(['GET'])
 def list_employees(request):
     return Response(list(Users.objects.all().values('id', 'username', 'role')))
+
 
 @csrf_exempt
 def delete_employee(request, emp_id):
     if request.method != "DELETE":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
-        emp = Users.objects.get(id=emp_id)
-        emp.delete()
+        Users.objects.get(id=emp_id).delete()
         return JsonResponse({"message": "Employee deleted"})
     except Users.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
+
 
 @csrf_exempt
 def update_employee(request, emp_id):
@@ -1531,56 +1238,54 @@ def update_employee(request, emp_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 #======================================================================================
 # ANALYTICS
 #======================================================================================
 
 def total_bill(request):
-    total = Billings.objects.aggregate(total_bill=Sum('bill'))['total_bill'] or 0
+    total = Billings.objects.aggregate(v=Sum('bill'))['v'] or 0
     return JsonResponse({"total_bill": round(float(total), 2)})
 
+
 def total_bal(request):
-    total = Billings.objects.aggregate(total_bal=Sum('b_cd'))['total_bal'] or 0
+    total = Billings.objects.aggregate(v=Sum('b_cd'))['v'] or 0
     return JsonResponse({"total_bal": round(float(total), 2)})
 
+
 def total_paid(request):
-    total = Billings.objects.aggregate(total_paid=Sum('paid'))['total_paid'] or 0
+    total = Billings.objects.aggregate(v=Sum('paid'))['v'] or 0
     return JsonResponse({"total_paid": round(float(total), 2)})
 
+
 def total_units(request):
-    total = Billings.objects.aggregate(total_units=Sum('units_used'))['total_units'] or 0
+    total = Billings.objects.aggregate(v=Sum('units_used'))['v'] or 0
     return JsonResponse({"total_units": round(float(total), 2)})
 
+
 def total_cust(request):
-    total = read_users.objects.aggregate(total_cust=Count('id'))['total_cust'] or 0
+    total = read_users.objects.aggregate(v=Count('id'))['v'] or 0
     return JsonResponse({"total_cust": total})
 
+
 def avg_units(request):
-    avg = Billings.objects.aggregate(avg_units=Avg('units_used'))['avg_units'] or 0
+    avg = Billings.objects.aggregate(v=Avg('units_used'))['v'] or 0
     return JsonResponse({"avg_units": round(float(avg), 2)})
 
+
 #======================================================================================
-# EXCEL UPLOAD/DOWNLOAD - FULLY AUTOMATED VERSION
+# EXCEL UPLOAD/DOWNLOAD
 #======================================================================================
 
 def download_readings_template(request):
-    template_path = os.path.join(
-        settings.BASE_DIR,
-        "templates",
-        "readings_template.xlsx"
-    )
+    template_path = os.path.join(settings.BASE_DIR, "templates", "readings_template.xlsx")
     wb = load_workbook(template_path)
     ws = wb.active
-    
+
     readings_data = readings.objects.all().values(
-        "user_id",
-        "name",
-        "phone",
-        "metre_num",
-        "prev_user",
-        "prev_sup"
+        "user_id", "name", "phone", "metre_num", "prev_user", "prev_sup"
     )
-    
+
     row = 2
     for r in readings_data:
         ws[f"A{row}"] = r["user_id"]
@@ -1589,17 +1294,15 @@ def download_readings_template(request):
         ws[f"D{row}"] = r["metre_num"]
         ws[f"E{row}"] = r["prev_user"]
         ws[f"F{row}"] = r["prev_sup"]
-        ws[f"G{row}"] = None
-        ws[f"H{row}"] = None
-        ws[f"I{row}"] = None
-        ws[f"J{row}"] = None
-        row += 1
-    
-    while row <= ws.max_row:
-        for col in ["A","B","C","D","E","F","G","H","I","J"]:
+        for col in ["G", "H", "I", "J"]:
             ws[f"{col}{row}"] = None
         row += 1
-    
+
+    while row <= ws.max_row:
+        for col in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]:
+            ws[f"{col}{row}"] = None
+        row += 1
+
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1607,16 +1310,13 @@ def download_readings_template(request):
     wb.save(response)
     return response
 
+
 @csrf_exempt
 def upload_readings_excel(request):
     """
-    FULLY AUTOMATED Excel upload - NO manual button clicking needed.
-    Automatically:
-    1. Creates ReadingHistory with current date showing PREV and CUR readings
-    2. Updates the readings table with new values
-    3. Creates/updates billing with correct amounts
-    4. Updates customer summaries
-    5. Creates audit trail
+    Automated Excel upload. For each row: records a ReadingHistory snapshot
+    (old prev vs new cur), updates the readings table, refreshes billing,
+    updates customer summaries, and writes an audit trail.
     """
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
@@ -1624,18 +1324,15 @@ def upload_readings_excel(request):
         file = request.FILES.get("file")
         if not file:
             return JsonResponse({"error": "No file uploaded"}, status=400)
-        
+
         df = pd.read_excel(file)
         if "user_id" not in df.columns:
-            return JsonResponse(
-                {"error": "Excel must contain user_id column"},
-                status=400
-            )
-        
+            return JsonResponse({"error": "Excel must contain user_id column"}, status=400)
+
         processed = 0
         skipped = 0
         errors = []
-        
+
         with transaction.atomic():
             for index, row in df.iterrows():
                 try:
@@ -1643,46 +1340,37 @@ def upload_readings_excel(request):
                     if pd.isna(user_id):
                         skipped += 1
                         continue
-                    
-                    reading = readings.objects.select_for_update().get(
-                        user_id=int(user_id)
-                    )
-                    
-                    # Store OLD values for history
+
+                    reading = readings.objects.select_for_update().get(user_id=int(user_id))
+
                     old_prev_user = reading.prev_user or 0
                     old_prev_sup = reading.prev_sup or 0
                     old_cur_user = reading.cur_user or 0
                     old_cur_sup = reading.cur_sup or 0
-                    
-                    # Get NEW values from Excel
+
                     cur_user = None if pd.isna(row.get("cur_user")) else int(row.get("cur_user"))
                     cur_sup = None if pd.isna(row.get("cur_sup")) else int(row.get("cur_sup"))
                     mid_user = None if pd.isna(row.get("mid_user")) else int(row.get("mid_user"))
                     mid_sup = None if pd.isna(row.get("mid_sup")) else int(row.get("mid_sup"))
-                    
+
                     if cur_user is None and cur_sup is None and mid_user is None and mid_sup is None:
                         skipped += 1
                         continue
-                    
-                    # Calculate units used
+
                     units_used = reading.units_used or 0
                     if cur_user is not None:
                         units_used = max(0, cur_user - (reading.prev_user or 0))
-                    
-                    # CRITICAL FIX: Create history with BOTH PREV and CUR values BEFORE updating
-                    # This ensures both old and new readings are recorded
-                    create_reading_history_with_values(
-                        reading=reading,
-                        prev_user=old_prev_user,  # Old prev reading
-                        prev_sup=old_prev_sup,    # Old prev sup
-                        cur_user=cur_user if cur_user is not None else old_cur_user,  # New current reading
-                        cur_sup=cur_sup if cur_sup is not None else old_cur_sup,      # New current sup
-                        units_used=units_used,
-                        recorded_by="excel_upload",
-                        role="system"
+
+                    # Snapshot BEFORE updating so both old "prev" and new "cur" are recorded
+                    create_reading_history(
+                        reading,
+                        recorded_by="excel_upload", role="system",
+                        prev_user=old_prev_user, prev_sup=old_prev_sup,
+                        cur_user=cur_user if cur_user is not None else old_cur_user,
+                        cur_sup=cur_sup if cur_sup is not None else old_cur_sup,
+                        units_used=units_used
                     )
-                    
-                    # Now update the reading with new values
+
                     if cur_user is not None:
                         reading.cur_user = cur_user
                         reading.units_used = units_used
@@ -1693,105 +1381,44 @@ def upload_readings_excel(request):
                     if mid_sup is not None:
                         reading.mid_sup = mid_sup
                     reading.save()
-                    
-                    # BILLING - AUTOMATICALLY UPDATE
-                    bill_amount = reading.units_used * reading.rate
-                    if reading.units_used <= 2:
-                        bill_amount = 300
-                    
-                    old_billing = Billings.objects.filter(user_id=reading.user_id).first()
-                    previous_balance = old_billing.bal if old_billing else Decimal("0")
-                    total_balance = previous_balance + Decimal(str(bill_amount))
-                    
-                    billing = Billings.objects.filter(user_id=reading.user_id).first()
-                    if billing:
-                        # Create billing history before update
-                        cycle_month = timezone.now().strftime("%Y-%m")
-                        create_billing_history(billing, cycle_month, "excel_upload", "system")
-                        
-                        billing.name = reading.name
-                        billing.phone = reading.phone
-                        billing.units_used = reading.units_used
-                        billing.rate = reading.rate
-                        billing.bill = bill_amount
-                        billing.b_cd = previous_balance
-                        billing.penalty = 0  # reset penalty/discount for the new cycle
-                        billing.bal = total_balance
-                        billing.paid = 0
-                        billing.status = "Unpaid"
-                        billing.prev_user = reading.prev_user
-                        billing.cur_user = reading.cur_user
-                        billing.sms_name = reading.metre_num
-                        billing.grp = reading.grp
-                        billing.parent = reading.parent
-                        billing.save()
-                    else:
-                        billing = Billings.objects.create(
-                            user_id=reading.user_id,
-                            name=reading.name,
-                            phone=reading.phone,
-                            units_used=reading.units_used,
-                            rate=reading.rate,
-                            bill=bill_amount,
-                            b_cd=previous_balance,
-                            penalty=0,
-                            bal=total_balance,
-                            paid=0,
-                            status="Unpaid",
-                            prev_user=reading.prev_user,
-                            cur_user=reading.cur_user,
-                            sms_name=reading.metre_num,
-                            grp=reading.grp,
-                            parent=reading.parent
-                        )
-                        cycle_month = timezone.now().strftime("%Y-%m")
-                        create_billing_history(billing, cycle_month, "excel_upload", "system")
-                    
-                    # Update customer summary
-                    update_customer_summary(reading.user_id)
-                    
-                    # Create log entry
+
+                    bill_amount = compute_bill_amount(reading.units_used, reading.rate, zero_threshold=2)
+                    apply_new_billing_cycle(reading, bill_amount, "excel_upload", "system")
+
                     create_log(
-                        username="excel_upload",
-                        role="system",
-                        action="UPDATE",
-                        table="readings",
-                        record_id=reading.id,
+                        username="excel_upload", role="system", action="UPDATE",
+                        table="readings", record_id=reading.id,
                         description=f"Excel upload: Prev={old_prev_user} → Curr={cur_user}, Units={units_used}"
                     )
-                    
+
                     processed += 1
-                    
+
                 except readings.DoesNotExist:
                     errors.append(f"Row {index}: User ID {row.get('user_id')} not found")
                     skipped += 1
                 except Exception as row_error:
                     errors.append(f"Row {index}: {str(row_error)}")
                     skipped += 1
-            
-            # Create audit trail for the entire upload
+
             create_audit_trail(
-                username="excel_upload",
-                role="system",
-                action="BULK_UPLOAD",
+                username="excel_upload", role="system", action="BULK_UPLOAD",
                 table_name="readings",
                 description=f"Excel upload: {processed} records processed, {skipped} skipped",
                 request=request
             )
-        
+
         return JsonResponse({
             "message": "Excel uploaded and processed successfully",
             "processed_rows": processed,
             "skipped_rows": skipped,
-            "errors": errors[:10]  # Return first 10 errors for debugging
+            "errors": errors[:10]
         })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 def download_billings_template(request):
-    data = Billings.objects.all().values(
-        "id", "name", "phone", "bill", "paid"
-    )
+    data = Billings.objects.all().values("id", "name", "phone", "bill", "paid")
     df = pd.DataFrame(list(data))
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -1799,6 +1426,7 @@ def download_billings_template(request):
     response['Content-Disposition'] = 'attachment; filename=billings_template.xlsx'
     df.to_excel(response, index=False)
     return response
+
 
 @csrf_exempt
 def upload_billings_excel(request):
@@ -1809,7 +1437,7 @@ def upload_billings_excel(request):
         df = pd.read_excel(file)
         updated = []
         errors = []
-        
+
         with transaction.atomic():
             for index, row in df.iterrows():
                 try:
@@ -1817,55 +1445,24 @@ def upload_billings_excel(request):
                     paid = row.get("paid")
                     if pd.isna(billing_id) or pd.isna(paid):
                         continue
-                    
+
                     billing = Billings.objects.get(id=int(billing_id))
-                    old_paid = billing.paid
                     new_paid = Decimal(str(paid))
-                    amount = new_paid - old_paid
-                    
-                    if amount > 0:
-                        # Get the previous balance (bal from Billings before this payment)
-                        previous_balance = billing.bal
-                        
-                        create_payment_history(
-                            billing=billing,
-                            amount=amount,
-                            previous_balance=previous_balance,
-                            payment_method='EXCEL',
-                            recorded_by="excel_upload",
-                            role="system"
-                        )
-                    
-                    billing.paid = new_paid
-                    penalty = billing.penalty or Decimal("0")
-                    total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
-                    billing.bal = total_due - new_paid
-                    
-                    if new_paid == 0:
-                        billing.status = "Unpaid"
-                    elif new_paid < total_due:
-                        billing.status = "Partially Paid"
-                    else:
-                        billing.status = "Paid"
-                    billing.save()
-                    
-                    update_customer_summary(billing.user_id)
-                    
+                    previous_balance = billing.bal
+
+                    receipt, old_paid, _ = apply_payment(
+                        billing, new_paid, previous_balance, 'EXCEL',
+                        username="excel_upload", role="system"
+                    )
+
                     create_log(
-                        "excel_upload",
-                        "system",
-                        "UPDATE",
-                        "billings",
-                        billing.id,
-                        f"Excel update: {old_paid} → {new_paid}",
-                        "paid",
-                        old_paid,
-                        new_paid
+                        "excel_upload", "system", "UPDATE", "billings", billing.id,
+                        f"Excel update: {old_paid} → {new_paid}", "paid", old_paid, new_paid
                     )
                     updated.append(billing.id)
                 except Exception as e:
                     errors.append(f"Row {index}: {str(e)}")
-        
+
         return JsonResponse({
             "message": "Excel uploaded successfully",
             "updated_count": len(updated),
@@ -1874,10 +1471,10 @@ def upload_billings_excel(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 def download_users_excel(request):
     users = read_users.objects.all().values(
-        "id", "fname", "phone", "metre_num",
-        "zone", "rate", "grp", "parent", "created_on"
+        "id", "fname", "phone", "metre_num", "zone", "rate", "grp", "parent", "created_on"
     )
     df = pd.DataFrame(list(users))
     response = HttpResponse(
@@ -1887,19 +1484,16 @@ def download_users_excel(request):
     df.to_excel(response, index=False)
     return response
 
+
 #======================================================================================
 # OTHER UTILITY ENDPOINTS
 #======================================================================================
 
 def billing_timer(request):
     today = datetime.now()
-    next_month = today.month + 1
-    next_year = today.year
-    if next_month > 12:
-        next_month = 1
-        next_year += 1
-    end_date = datetime(next_year, next_month, calendar.monthrange(next_year, next_month)[1], 23, 59, 59)
-    
+    end_date_only = get_next_cycle_date(today.date())
+    end_date = datetime(end_date_only.year, end_date_only.month, end_date_only.day, 23, 59, 59)
+
     diff = end_date - today
     return JsonResponse({
         "days": diff.days,
@@ -1907,6 +1501,7 @@ def billing_timer(request):
         "minutes": (diff.seconds % 3600) // 60,
         "seconds": diff.seconds % 60
     })
+
 
 @csrf_exempt
 def reset_mid_month_readings(request):
@@ -1916,37 +1511,30 @@ def reset_mid_month_readings(request):
         data = json.loads(request.body) if request.body else {}
         username = data.get("username", "system")
         role = data.get("role", "system")
-        
+
         with transaction.atomic():
-            readings_qs = readings.objects.all()
-            for r in readings_qs:
+            for r in readings.objects.all():
                 old_mid_user = r.mid_user
                 old_mid_sup = r.mid_sup
-                
-                # Create history before reset with current date
+
                 create_reading_history(r, username, role)
-                
+
                 r.mid_user = 0
                 r.mid_sup = 0
                 r.save()
-                
+
                 create_log(
-                    username=username,
-                    role=role,
-                    action="UPDATE",
-                    table="readings",
-                    record_id=r.id,
-                    field_changed="mid_month_reset",
+                    username=username, role=role, action="UPDATE", table="readings",
+                    record_id=r.id, field_changed="mid_month_reset",
                     old_val=f"user:{old_mid_user}, sup:{old_mid_sup}",
                     new_val="user:0, sup:0",
                     description=f"Mid-month readings reset for {r.name}"
                 )
-        
-        return JsonResponse({
-            "message": "Mid-month readings reset successfully"
-        })
+
+        return JsonResponse({"message": "Mid-month readings reset successfully"})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def restore_readings(request):
@@ -1955,14 +1543,15 @@ def restore_readings(request):
         return JsonResponse({"error": "Invalid request"}, status=400)
     if not LAST_STATE_SNAPSHOT:
         return JsonResponse({"error": "No snapshot available"}, status=400)
-    
+
     with transaction.atomic():
         readings.objects.all().delete()
         for r in LAST_STATE_SNAPSHOT:
             r.pop("id", None)
             readings.objects.create(**r)
-    
+
     return JsonResponse({"message": "System restored successfully"})
+
 
 @csrf_exempt
 def update_all_users(request):
@@ -1973,16 +1562,7 @@ def update_all_users(request):
         with transaction.atomic():
             for customer in customers:
                 user = read_users.objects.get(id=customer["id"])
-                
-                old_data = {
-                    'fname': user.fname,
-                    'phone': user.phone,
-                    'metre_num': user.metre_num,
-                    'rate': user.rate,
-                    'grp': user.grp,
-                    'parent': user.parent
-                }
-                
+
                 user.fname = customer["fname"]
                 user.phone = customer["phone"]
                 user.metre_num = customer["metre_num"]
@@ -1990,35 +1570,24 @@ def update_all_users(request):
                 user.grp = customer["grp"]
                 user.parent = customer["parent"]
                 user.save()
-                
+
                 readings.objects.filter(user_id=user.id).update(
-                    name=user.fname,
-                    phone=user.phone,
-                    metre_num=user.metre_num,
-                    rate=user.rate,
-                    grp=user.grp,
-                    parent=user.parent
+                    name=user.fname, phone=user.phone, metre_num=user.metre_num,
+                    rate=user.rate, grp=user.grp, parent=user.parent
                 )
-                
                 Billings.objects.filter(user_id=user.id).update(
-                    name=user.fname,
-                    phone=user.phone,
-                    rate=user.rate,
-                    sms_name=user.metre_num,
-                    grp=user.grp,
-                    parent=user.parent
+                    name=user.fname, phone=user.phone, rate=user.rate,
+                    sms_name=user.metre_num, grp=user.grp, parent=user.parent
                 )
-                
+
                 update_customer_summary(user.id)
-        
-        return JsonResponse({
-            "success": True,
-            "message": "All users updated successfully."
-        })
+
+        return JsonResponse({"success": True, "message": "All users updated successfully."})
     except read_users.DoesNotExist:
         return JsonResponse({"error": "One or more users do not exist."}, status=404)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
 
 @csrf_exempt
 def update_all_bill_phones(request):
@@ -2029,18 +1598,14 @@ def update_all_bill_phones(request):
         phone = data.get("phone")
         if not phone:
             return JsonResponse({"error": "Phone number is required"}, status=400)
-        
+
         updated = Billings.objects.update(phone=phone)
-        
-        # Also update customer summaries
         CustomerPaymentSummary.objects.update(phone=phone)
-        
-        return JsonResponse({
-            "success": True,
-            "updated": updated
-        })
+
+        return JsonResponse({"success": True, "updated": updated})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
 
 #======================================================================================
 # SMS FUNCTIONS
@@ -2051,322 +1616,239 @@ PARTNER_ID = "16256"
 API_KEY = "bc1bc562ccb7c72732e7fa0add447129"
 SHORTCODE = "AdvantaSMS"
 
+
 def send_bulk_sms(customers):
     payload = {
         "count": len(customers),
-        "smslist": []
+        "smslist": [
+            {
+                "partnerID": PARTNER_ID,
+                "apikey": API_KEY,
+                "pass_type": "plain",
+                "clientsmsid": i + 1,
+                "mobile": customer["phone"],
+                "message": customer["message"],
+                "shortcode": SHORTCODE
+            }
+            for i, customer in enumerate(customers)
+        ]
     }
-    for i, customer in enumerate(customers):
-        payload["smslist"].append({
-            "partnerID": PARTNER_ID,
-            "apikey": API_KEY,
-            "pass_type": "plain",
-            "clientsmsid": i + 1,
-            "mobile": customer["phone"],
-            "message": customer["message"],
-            "shortcode": SHORTCODE
-        })
-    headers = {
-        "Content-Type": "application/json"
-    }
-    response = requests.post(API_URL, json=payload, headers=headers)
+    response = requests.post(API_URL, json=payload, headers={"Content-Type": "application/json"})
     return response.json()
+
 
 @csrf_exempt
 def send_sms_view(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-            customers = data.get("customers", [])
-            if not customers:
-                return JsonResponse({"error": "No customers selected"}, status=400)
-            
-            result = send_bulk_sms(customers)
-            print(result)
-            
-            # Log SMS sending
-            create_audit_trail(
-                username=data.get("username", "system"),
-                role=data.get("role", "system"),
-                action="EXPORT",
-                table_name="sms",
-                description=f"SMS sent to {len(customers)} customers",
-                request=request
-            )
-            
-            return JsonResponse(result, safe=False)
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        data = json.loads(request.body)
+        customers = data.get("customers", [])
+        if not customers:
+            return JsonResponse({"error": "No customers selected"}, status=400)
+
+        result = send_bulk_sms(customers)
+
+        create_audit_trail(
+            username=data.get("username", "system"), role=data.get("role", "system"),
+            action="EXPORT", table_name="sms",
+            description=f"SMS sent to {len(customers)} customers",
+            request=request
+        )
+
+        return JsonResponse(result, safe=False)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 def process_reading_update(
-    user_id,
-    new_cur_user=None,
-    new_cur_sup=None,
-    mid_user=None,
-    mid_sup=None,
-    username="system",
-    role="system"
+    user_id, new_cur_user=None, new_cur_sup=None,
+    mid_user=None, mid_sup=None, username="system", role="system"
 ):
+    """
+    Non-HTTP helper for applying a single reading update (used by internal
+    automation / scheduled jobs rather than the HTTP endpoints above).
+    """
     try:
         reading = readings.objects.get(user_id=user_id)
     except readings.DoesNotExist:
-        create_log(username, role, "ERROR", "readings", user_id,
-                   "Reading record not found")
+        create_log(username, role, "ERROR", "readings", user_id, "Reading record not found")
         return
-    
-    # Store old values
-    old_prev_user = reading.prev_user or 0
-    old_prev_sup = reading.prev_sup or 0
-    old_cur_user = reading.cur_user or 0
-    old_cur_sup = reading.cur_sup or 0
-    
+
     prev_user = reading.prev_user or 0
     prev_sup = reading.prev_sup or 0
-    
+
     if mid_user is not None:
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"mid_user {reading.mid_user} → {mid_user}",
                    "mid_user", reading.mid_user, mid_user)
         update_reading_field(reading, "mid_user", mid_user, username, role)
-    
+
     if mid_sup is not None:
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"mid_sup {reading.mid_sup} → {mid_sup}",
                    "mid_sup", reading.mid_sup, mid_sup)
         update_reading_field(reading, "mid_sup", mid_sup, username, role)
-    
+
     if new_cur_user is None and new_cur_sup is None:
         reading.save()
         return
-    
+
     units_used = reading.units_used or 0
     if new_cur_user is not None:
         try:
-            units_used = int(new_cur_user) - int(prev_user)
+            units_used = max(0, int(new_cur_user) - int(prev_user))
         except Exception:
-            create_log(username, role, "ERROR", "readings", reading.id,
-                       "Invalid numeric reading input")
+            create_log(username, role, "ERROR", "readings", reading.id, "Invalid numeric reading input")
             return
-        if units_used < 0:
-            units_used = 0
-    
-    if new_cur_user is not None:
+
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"user reading {prev_user} → {new_cur_user}",
                    "cur_user", prev_user, new_cur_user)
-    
+        update_reading_field(reading, "cur_user", new_cur_user, username, role)
+
     if new_cur_sup is not None:
         create_log(username, role, "UPDATE", "readings", reading.id,
                    f"sup reading {prev_sup} → {new_cur_sup}",
                    "cur_sup", prev_sup, new_cur_sup)
-    
-    if new_cur_user is not None:
-        update_reading_field(reading, "cur_user", new_cur_user, username, role)
-    if new_cur_sup is not None:
         update_reading_field(reading, "cur_sup", new_cur_sup, username, role)
-    
+
     reading.units_used = units_used
     reading.save()
-    
-    # Create history with current date
+
     create_reading_history(reading, username, role)
-    
-    # BILLING
+
     if new_cur_user is not None:
         rate = reading.rate or 0
-        bill_amount = units_used * rate
-        if units_used <= 2:
-            bill_amount = 300
-        
+        bill_amount = compute_bill_amount(units_used, rate, zero_threshold=2)
+
         old_billing = Billings.objects.filter(user_id=user_id).first()
         previous_balance = old_billing.bal if old_billing else Decimal("0")
-        
+
         billing, created = Billings.objects.get_or_create(
             user_id=user_id,
             billed_on=date.today(),
             defaults={
-                "name": reading.name,
-                "phone": reading.phone,
-                "units_used": units_used,
-                "rate": rate,
-                "bill": bill_amount,
-                "paid": 0,
-                "penalty": 0,
-                "bal": bill_amount,
-                "status": "Unpaid",
-                "b_cd": previous_balance,
-                "prev_user": reading.prev_user,
-                "cur_user": reading.cur_user,
-                "sms_name": reading.metre_num,
-                "grp": reading.grp,
-                "parent": reading.parent
+                "name": reading.name, "phone": reading.phone,
+                "units_used": units_used, "rate": rate, "bill": bill_amount,
+                "paid": 0, "penalty": 0, "bal": bill_amount, "status": "Unpaid",
+                "b_cd": previous_balance, "prev_user": reading.prev_user,
+                "cur_user": reading.cur_user, "sms_name": reading.metre_num,
+                "grp": reading.grp, "parent": reading.parent
             }
         )
-        
+
         if not created:
-            # Save billing history before update
-            cycle_month = timezone.now().strftime("%Y-%m")
-            create_billing_history(billing, cycle_month, username, role)
-            
+            create_billing_history(billing, current_cycle_month(), username, role)
+
             billing.units_used = units_used
             billing.bill = bill_amount
             billing.paid = 0
             billing.penalty = 0  # reset penalty/discount for the new cycle
             billing.b_cd = previous_balance
             billing.bal = previous_balance + Decimal(str(bill_amount))
-            
-            if billing.paid == 0:
-                billing.status = "Unpaid"
-            elif billing.paid < bill_amount:
-                billing.status = "Partially Paid"
-            else:
-                billing.status = "Paid"
+            billing.status = compute_billing_status(billing.paid, bill_amount)
             billing.save()
-        
+
         update_customer_summary(user_id)
 
-# ============================================================
-# PAYMENT HISTORY FETCH ENDPOINTS
-# ============================================================
+
+#======================================================================================
+# PAYMENT HISTORY SERIALIZATION + FETCH ENDPOINTS
+#======================================================================================
+
+def _payment_method_display(method):
+    return dict(PaymentHistory.PAYMENT_METHODS).get(method, method)
+
+
+def _payment_status_display(status_value):
+    return dict(PaymentHistory.PAYMENT_STATUS).get(status_value, status_value)
+
+
+def _serialize_payment(p):
+    """Shared serializer for PaymentHistory rows, used across all payment-history endpoints."""
+    return {
+        'id': p.id,
+        'billing_id': p.billing_id,
+        'user_id': p.user_id,
+        'name': p.name,
+        'phone': p.phone,
+        'grp': p.grp,
+        'parent': p.parent,
+        'amount_paid': float(p.amount_paid),
+        'previous_balance': float(p.previous_balance),
+        'current_balance': float(p.current_balance),
+        'bill_amount': float(p.bill_amount),
+        'payment_method': p.payment_method,
+        'payment_method_display': _payment_method_display(p.payment_method),
+        'status': p.status,
+        'status_display': _payment_status_display(p.status),
+        'receipt_number': p.receipt_number,
+        'notes': p.notes,
+        'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
+        'recorded_by': p.recorded_by,
+        'role': p.role,
+        'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
+    }
+
 
 @api_view(['GET'])
 def get_all_payment_history(request):
-    """
-    Fetch all payment history records with optional filters.
-    Returns complete payment history with customer details.
-    """
+    """Fetch all payment history records with optional filters."""
     try:
-        # Get filter parameters
         user_id = request.GET.get('user_id')
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
         payment_method = request.GET.get('payment_method')
-        status = request.GET.get('status')
-        search = request.GET.get('search')  # Search by name or phone
-        
-        # Start with all payment history
-        payment_history_qs = PaymentHistory.objects.all()
-        
-        # Apply filters
+        status_filter = request.GET.get('status')
+        search = request.GET.get('search')
+
+        qs = PaymentHistory.objects.all()
         if user_id:
-            payment_history_qs = payment_history_qs.filter(user_id=user_id)
-        
+            qs = qs.filter(user_id=user_id)
         if start_date:
-            payment_history_qs = payment_history_qs.filter(payment_date__gte=start_date)
-        
+            qs = qs.filter(payment_date__gte=start_date)
         if end_date:
-            payment_history_qs = payment_history_qs.filter(payment_date__lte=end_date)
-        
+            qs = qs.filter(payment_date__lte=end_date)
         if payment_method:
-            payment_history_qs = payment_history_qs.filter(payment_method=payment_method)
-        
-        if status:
-            payment_history_qs = payment_history_qs.filter(status=status)
-        
+            qs = qs.filter(payment_method=payment_method)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
         if search:
-            payment_history_qs = payment_history_qs.filter(
-                Q(name__icontains=search) | Q(phone__icontains=search)
-            )
-        
-        # Order by most recent first
-        payment_history_qs = payment_history_qs.order_by('-timestamp')
-        
-        # Prepare data for frontend
-        data = []
-        for p in payment_history_qs:
-            data.append({
-                'id': p.id,
-                'billing_id': p.billing_id,
-                'user_id': p.user_id,
-                'name': p.name,
-                'phone': p.phone,
-                'grp': p.grp,
-                'parent': p.parent,
-                'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),  # This is the bal from Billings
-                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
-                'bill_amount': float(p.bill_amount),
-                'payment_method': p.payment_method,
-                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
-                'status': p.status,
-                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
-                'receipt_number': p.receipt_number,
-                'notes': p.notes,
-                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
-                'recorded_by': p.recorded_by,
-                'role': p.role,
-                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
-            })
-        
-        # Get summary statistics
-        total_payments = payment_history_qs.count()
-        total_amount = payment_history_qs.aggregate(
-            total=Sum('amount_paid')
-        )['total'] or 0
-        
+            qs = qs.filter(Q(name__icontains=search) | Q(phone__icontains=search))
+
+        qs = qs.order_by('-timestamp')
+        data = [_serialize_payment(p) for p in qs]
+
+        total_amount = qs.aggregate(total=Sum('amount_paid'))['total'] or 0
+
         return Response({
             'success': True,
             'data': data,
             'summary': {
-                'total_payments': total_payments,
+                'total_payments': qs.count(),
                 'total_amount': float(total_amount),
                 'filters_applied': {
-                    'user_id': user_id,
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'payment_method': payment_method,
-                    'status': status,
-                    'search': search
+                    'user_id': user_id, 'start_date': start_date, 'end_date': end_date,
+                    'payment_method': payment_method, 'status': status_filter, 'search': search
                 }
             }
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 def get_payment_history_by_user(request, user_id):
-    """
-    Fetch payment history for a specific user.
-    """
+    """Fetch payment history for a specific user."""
     try:
-        payment_history = PaymentHistory.objects.filter(
-            user_id=user_id
-        ).order_by('-timestamp')
-        
-        if not payment_history.exists():
-            return Response({
-                'success': True,
-                'data': [],
-                'message': 'No payment history found for this user'
-            })
-        
-        data = []
-        for p in payment_history:
-            data.append({
-                'id': p.id,
-                'billing_id': p.billing_id,
-                'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),  # bal from Billings
-                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
-                'bill_amount': float(p.bill_amount),
-                'payment_method': p.payment_method,
-                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
-                'status': p.status,
-                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
-                'receipt_number': p.receipt_number,
-                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
-                'recorded_by': p.recorded_by,
-                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
-            })
-        
-        # Get user summary
+        qs = PaymentHistory.objects.filter(user_id=user_id).order_by('-timestamp')
+        if not qs.exists():
+            return Response({'success': True, 'data': [], 'message': 'No payment history found for this user'})
+
+        data = [_serialize_payment(p) for p in qs]
         user_summary = CustomerPaymentSummary.objects.filter(user_id=user_id).first()
-        
+
         return Response({
             'success': True,
             'user_id': user_id,
@@ -2378,59 +1860,41 @@ def get_payment_history_by_user(request, user_id):
                 'last_payment': data[0] if data else None
             }
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 def get_payment_summary(request):
-    """
-    Get summary statistics of all payments.
-    """
+    """Get summary statistics of all payments."""
     try:
-        # Get filter parameters
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
-        
-        payment_history_qs = PaymentHistory.objects.all()
-        
+
+        qs = PaymentHistory.objects.all()
         if start_date:
-            payment_history_qs = payment_history_qs.filter(payment_date__gte=start_date)
+            qs = qs.filter(payment_date__gte=start_date)
         if end_date:
-            payment_history_qs = payment_history_qs.filter(payment_date__lte=end_date)
-        
-        # Aggregations
-        total_payments = payment_history_qs.count()
-        total_amount = payment_history_qs.aggregate(
-            total=Sum('amount_paid')
-        )['total'] or 0
-        
-        # Payment method breakdown
-        method_breakdown = payment_history_qs.values('payment_method').annotate(
-            count=Count('id'),
-            total=Sum('amount_paid')
+            qs = qs.filter(payment_date__lte=end_date)
+
+        total_payments = qs.count()
+        total_amount = qs.aggregate(total=Sum('amount_paid'))['total'] or 0
+
+        method_breakdown = qs.values('payment_method').annotate(
+            count=Count('id'), total=Sum('amount_paid')
         ).order_by('-total')
-        
-        # Daily payment trend
-        daily_trend = payment_history_qs.values('payment_date').annotate(
-            count=Count('id'),
-            total=Sum('amount_paid')
-        ).order_by('-payment_date')[:30]  # Last 30 days
-        
-        # Prepare method breakdown with display names
-        method_data = []
-        for method in method_breakdown:
-            method_data.append({
-                'method': method['payment_method'],
-                'method_display': dict(PaymentHistory.PAYMENT_METHODS).get(method['payment_method'], method['payment_method']),
-                'count': method['count'],
-                'total': float(method['total'])
-            })
-        
+
+        daily_trend = qs.values('payment_date').annotate(
+            count=Count('id'), total=Sum('amount_paid')
+        ).order_by('-payment_date')[:30]
+
+        method_data = [{
+            'method': m['payment_method'],
+            'method_display': _payment_method_display(m['payment_method']),
+            'count': m['count'],
+            'total': float(m['total'])
+        } for m in method_breakdown]
+
         return Response({
             'success': True,
             'summary': {
@@ -2441,150 +1905,52 @@ def get_payment_summary(request):
             'method_breakdown': method_data,
             'daily_trend': list(daily_trend)
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 def get_payment_receipt(request, receipt_number):
-    """
-    Get payment details by receipt number.
-    """
+    """Get payment details by receipt number."""
     try:
-        payment = PaymentHistory.objects.filter(
-            receipt_number=receipt_number
-        ).first()
-        
+        payment = PaymentHistory.objects.filter(receipt_number=receipt_number).first()
         if not payment:
-            return Response({
-                'success': False,
-                'error': 'Payment receipt not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Get associated billing information
+            return Response({'success': False, 'error': 'Payment receipt not found'}, status=status.HTTP_404_NOT_FOUND)
+
         billing = Billings.objects.filter(id=payment.billing_id).first()
-        
-        data = {
-            'id': payment.id,
-            'billing_id': payment.billing_id,
-            'user_id': payment.user_id,
-            'name': payment.name,
-            'phone': payment.phone,
-            'grp': payment.grp,
-            'parent': payment.parent,
-            'amount_paid': float(payment.amount_paid),
-            'previous_balance': float(payment.previous_balance),  # bal from Billings
-            'current_balance': float(payment.current_balance),    # previous_balance - amount_paid
-            'bill_amount': float(payment.bill_amount),
-            'payment_method': payment.payment_method,
-            'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(payment.payment_method, payment.payment_method),
-            'status': payment.status,
-            'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(payment.status, payment.status),
-            'receipt_number': payment.receipt_number,
-            'notes': payment.notes,
-            'payment_date': payment.payment_date.strftime('%Y-%m-%d') if payment.payment_date else None,
-            'recorded_by': payment.recorded_by,
-            'role': payment.role,
-            'timestamp': payment.timestamp.strftime('%Y-%m-%d %H:%M:%S') if payment.timestamp else None,
-            'billing_details': {
-                'units_used': billing.units_used if billing else None,
-                'rate': billing.rate if billing else None,
-                'bill_amount': billing.bill if billing else None,
-                'status': billing.status if billing else None
-            } if billing else None
-        }
-        
-        return Response({
-            'success': True,
-            'data': data
-        })
-        
+        data = _serialize_payment(payment)
+        data['billing_details'] = {
+            'units_used': billing.units_used if billing else None,
+            'rate': billing.rate if billing else None,
+            'bill_amount': billing.bill if billing else None,
+            'status': billing.status if billing else None
+        } if billing else None
+
+        return Response({'success': True, 'data': data})
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-# ============================================================
-# SIMPLE JSON RESPONSE VERSION (if you prefer not to use DRF)
-# ============================================================
 
 def get_payment_history_json(request):
-    """
-    Simple JSON response version of payment history.
-    This uses regular Django JsonResponse instead of DRF.
-    """
+    """Simple JsonResponse (non-DRF) version of the full payment history."""
     try:
-        # Get all payment history
         payments = PaymentHistory.objects.all().order_by('-timestamp')
-        
-        # Prepare data
-        data = []
-        for p in payments:
-            data.append({
-                'id': p.id,
-                'billing_id': p.billing_id,
-                'user_id': p.user_id,
-                'name': p.name,
-                'phone': p.phone,
-                'grp': p.grp,
-                'parent': p.parent,
-                'amount_paid': float(p.amount_paid),
-                'previous_balance': float(p.previous_balance),  # bal from Billings
-                'current_balance': float(p.current_balance),    # previous_balance - amount_paid
-                'bill_amount': float(p.previous_balance),
-                'payment_method': p.payment_method,
-                'payment_method_display': dict(PaymentHistory.PAYMENT_METHODS).get(p.payment_method, p.payment_method),
-                'status': p.status,
-                'status_display': dict(PaymentHistory.PAYMENT_STATUS).get(p.status, p.status),
-                'receipt_number': p.receipt_number,
-                'notes': p.notes,
-                'payment_date': p.payment_date.strftime('%Y-%m-%d') if p.payment_date else None,
-                'recorded_by': p.recorded_by,
-                'role': p.role,
-                'timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M:%S') if p.timestamp else None
-            })
-        
-        # Get summary
-        total_amount = PaymentHistory.objects.aggregate(
-            total=Sum('amount_paid')
-        )['total'] or 0
-        
+        data = [_serialize_payment(p) for p in payments]
+        total_amount = PaymentHistory.objects.aggregate(total=Sum('amount_paid'))['total'] or 0
+
         return JsonResponse({
             'success': True,
             'data': data,
-            'summary': {
-                'total_payments': len(data),
-                'total_amount': float(total_amount)
-            }
+            'summary': {'total_payments': len(data), 'total_amount': float(total_amount)}
         })
-        
     except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=500)
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
-# ============================================================
-# PAYMENT RECEIPT DOWNLOAD (modernized design)
-# ============================================================
-from io import BytesIO
-from textwrap import wrap
-from datetime import datetime
+#======================================================================================
+# PAYMENT RECEIPT PDF (modernized design)
+#======================================================================================
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-
-
-# ---------- Design tokens (tweak these to re-theme the receipt) ----------
 NAVY = colors.HexColor('#0F172A')
 SLATE = colors.HexColor('#475569')
 LIGHT_SLATE = colors.HexColor('#94A3B8')
@@ -2602,8 +1968,8 @@ COMPANY_ADDRESS = "+254 741 088 799"
 COMPANY_INITIALS = "KA"
 
 
-def _status_color(status):
-    s = (status or "").strip().lower()
+def _status_color(status_value):
+    s = (status_value or "").strip().lower()
     if s in ("completed", "paid", "success"):
         return GREEN
     if s in ("pending", "processing"):
@@ -2646,9 +2012,9 @@ def _draw_receipt(c, payment, billing):
     y = page_h - header_h - 12 * mm
 
     # ===== Status badge + issue date =====
-    status = (payment.status or "")
-    status_color = _status_color(status)
-    badge_text = status.upper() if status else "N/A"
+    status_text = payment.status or ""
+    status_color = _status_color(status_text)
+    badge_text = status_text.upper() if status_text else "N/A"
     c.setFont("Helvetica-Bold", 9)
     badge_w = c.stringWidth(badge_text, "Helvetica-Bold", 9) + 14
     c.setFillColor(status_color)
@@ -2667,10 +2033,10 @@ def _draw_receipt(c, payment, billing):
     col1_x = 20 * mm
     col2_x = page_w / 2 + 5 * mm
 
-    def section_label(x, y, text):
+    def section_label(x, y_pos, text):
         c.setFont("Helvetica-Bold", 8.5)
         c.setFillColor(LIGHT_SLATE)
-        c.drawString(x, y, text.upper())
+        c.drawString(x, y_pos, text.upper())
 
     section_label(col1_x, y, "Billed To")
     section_label(col2_x, y, "Receipt Details")
@@ -2685,7 +2051,7 @@ def _draw_receipt(c, payment, billing):
     c.setFont("Helvetica", 9.5)
     c.setFillColor(SLATE)
     c.drawString(col1_x, y, payment.phone or "N/A")
-    c.drawString(col2_x, y, f"Status: {status if status else 'N/A'}")
+    c.drawString(col2_x, y, f"Status: {status_text if status_text else 'N/A'}")
     y -= 12 * mm
 
     c.setStrokeColor(BORDER)
@@ -2776,36 +2142,21 @@ def _draw_receipt(c, payment, billing):
     c.drawCentredString(page_w / 2, footer_y + 4 * mm, "Thank you for your payment!")
     c.setFont("Helvetica", 8)
     c.setFillColor(LIGHT_SLATE)
-    c.drawCentredString(
-        page_w / 2, footer_y - 1 * mm,
-        f"{COMPANY_NAME.title()}  \u2022  This is a system-generated receipt."
-    )
-    c.drawCentredString(
-        page_w / 2, footer_y - 5.5 * mm,
-        f"Generated on {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
-    )
+    c.drawCentredString(page_w / 2, footer_y - 1 * mm,
+                         f"{COMPANY_NAME.title()}  \u2022  This is a system-generated receipt.")
+    c.drawCentredString(page_w / 2, footer_y - 5.5 * mm,
+                         f"Generated on {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
 
 
 def download_payment_receipt(request, receipt_number):
-    """
-    Download payment receipt as PDF.
-    """
+    """Download a single payment receipt as PDF."""
     try:
-        # Get payment record
-        payment = PaymentHistory.objects.filter(
-            receipt_number=receipt_number
-        ).first()
-
+        payment = PaymentHistory.objects.filter(receipt_number=receipt_number).first()
         if not payment:
-            return JsonResponse({
-                'success': False,
-                'error': 'Payment receipt not found'
-            }, status=404)
+            return JsonResponse({'success': False, 'error': 'Payment receipt not found'}, status=404)
 
-        # Get billing info
         billing = Billings.objects.filter(id=payment.billing_id).first()
 
-        # Build the PDF using low-level canvas drawing for full layout control
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
         _draw_receipt(c, payment, billing)
@@ -2815,268 +2166,164 @@ def download_payment_receipt(request, receipt_number):
         pdf_data = buffer.getvalue()
         buffer.close()
 
-        # Create response
         response = HttpResponse(pdf_data, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="receipt_{receipt_number}.pdf"'
 
-        # Log the download
         create_audit_trail(
-            username=request.GET.get('username', 'system'),
-            role=request.GET.get('role', 'system'),
-            action="DOWNLOAD",
-            table_name="payment_history",
-            record_id=payment.id,
-            description=f"Payment receipt downloaded: {receipt_number}",
-            request=request
+            username=request.GET.get('username', 'system'), role=request.GET.get('role', 'system'),
+            action="DOWNLOAD", table_name="payment_history", record_id=payment.id,
+            description=f"Payment receipt downloaded: {receipt_number}", request=request
         )
 
         return response
-
     except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=500)
-    
-#=========================================================================================
-# ============================================================
-# DOWNLOAD USER PAYMENT HISTORY (MULTI-PAGE PDF)
-# ============================================================
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
 
 @api_view(['GET'])
 def download_user_payment_history(request, user_id):
-    """
-    Download complete payment history for a specific user as a multi-page PDF.
-    Each payment is formatted as a separate receipt page.
-    """
+    """Download the complete payment history for a user as a multi-page PDF (one receipt per page)."""
     try:
-        # Get all payments for this user
-        payments = PaymentHistory.objects.filter(
-            user_id=user_id
-        ).order_by('-timestamp')
-        
+        payments = PaymentHistory.objects.filter(user_id=user_id).order_by('-timestamp')
         if not payments.exists():
-            return Response({
-                'success': False,
-                'error': 'No payment history found for this user'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Get user info from first payment
+            return Response({'success': False, 'error': 'No payment history found for this user'},
+                             status=status.HTTP_404_NOT_FOUND)
+
         first_payment = payments.first()
         user_name = first_payment.name
-        user_phone = first_payment.phone
-        
-        # Create PDF with multiple pages
+
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
-        
-        # Draw each payment as a separate page
+
+        payment_count = payments.count()
         for idx, payment in enumerate(payments):
-            # Get billing info for this payment
             billing = Billings.objects.filter(id=payment.billing_id).first()
-            
-            # Draw the receipt
             _draw_receipt(c, payment, billing)
-            
-            # Add a page break (except for the last page)
-            if idx < len(payments) - 1:
+            if idx < payment_count - 1:
                 c.showPage()
-        
+
         c.save()
         pdf_data = buffer.getvalue()
         buffer.close()
-        
-        # Create response
+
         response = HttpResponse(pdf_data, content_type='application/pdf')
         filename = f"payment_history_{user_name}_{user_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
-        # Log the download
+
         create_audit_trail(
-            username=request.GET.get('username', 'system'),
-            role=request.GET.get('role', 'system'),
-            action="DOWNLOAD",
-            table_name="payment_history",
-            record_id=None,
-            description=f"User payment history downloaded for {user_name} (ID: {user_id}) - {payments.count()} records",
+            username=request.GET.get('username', 'system'), role=request.GET.get('role', 'system'),
+            action="DOWNLOAD", table_name="payment_history", record_id=None,
+            description=f"User payment history downloaded for {user_name} (ID: {user_id}) - {payment_count} records",
             request=request
         )
-        
+
         return response
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ============================================================
-# READING HISTORY FETCH ENDPOINTS
-# ============================================================
+#======================================================================================
+# READING HISTORY SERIALIZATION + FETCH ENDPOINTS
+#======================================================================================
+
+def _serialize_reading_history(h):
+    """Shared serializer for ReadingHistory rows, used across reading-history endpoints."""
+    return {
+        'id': h.id,
+        'reading_id': h.reading_id,
+        'user_id': h.user_id,
+        'name': h.name,
+        'phone': h.phone,
+        'metre_num': h.metre_num,
+        'grp': h.grp,
+        'parent': h.parent,
+        'prev_user': h.prev_user or 0,
+        'prev_sup': h.prev_sup or 0,
+        'cur_user': h.cur_user or 0,
+        'cur_sup': h.cur_sup or 0,
+        'mid_user': h.mid_user or 0,
+        'mid_sup': h.mid_sup or 0,
+        'units_used': h.units_used or 0,
+        'rate': h.rate or 0,
+        'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
+        'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
+        'cycle_month': h.cycle_month,
+        'recorded_by': h.recorded_by,
+        'role': h.role,
+        'version': h.version,
+        'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
+    }
+
 
 @api_view(['GET'])
 def get_reading_history_list(request):
-    """
-    Fetch all reading history records with advanced filtering and pagination.
-    Returns complete reading history with customer details and metadata.
-    """
+    """Fetch all reading history records with advanced filtering and pagination."""
     try:
-        # Get filter parameters
         user_id = request.GET.get('user_id')
         cycle_month = request.GET.get('cycle_month')
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
-        search = request.GET.get('search')  # Search by name or phone
+        search = request.GET.get('search')
         recorded_by = request.GET.get('recorded_by')
-        
-        # Pagination parameters
+
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('page_size', 50))
         offset = (page - 1) * page_size
-        
-        # Start with all reading history
-        history_qs = ReadingHistory.objects.all()
-        
-        # Apply filters
+
+        qs = ReadingHistory.objects.all()
         if user_id:
-            history_qs = history_qs.filter(user_id=user_id)
-        
+            qs = qs.filter(user_id=user_id)
         if cycle_month:
-            history_qs = history_qs.filter(cycle_month=cycle_month)
-        
+            qs = qs.filter(cycle_month=cycle_month)
         if start_date:
-            history_qs = history_qs.filter(reading_date__gte=start_date)
-        
+            qs = qs.filter(reading_date__gte=start_date)
         if end_date:
-            history_qs = history_qs.filter(reading_date__lte=end_date)
-        
+            qs = qs.filter(reading_date__lte=end_date)
         if search:
-            history_qs = history_qs.filter(
-                Q(name__icontains=search) | Q(phone__icontains=search)
-            )
-        
+            qs = qs.filter(Q(name__icontains=search) | Q(phone__icontains=search))
         if recorded_by:
-            history_qs = history_qs.filter(recorded_by__icontains=recorded_by)
-        
-        # Get total count for pagination
-        total_count = history_qs.count()
-        
-        # Order by most recent first
-        history_qs = history_qs.order_by('-timestamp')
-        
-        # Apply pagination
-        history_qs = history_qs[offset:offset + page_size]
-        
-        # Prepare data for frontend
-        data = []
-        for h in history_qs:
-            data.append({
-                'id': h.id,
-                'reading_id': h.reading_id,
-                'user_id': h.user_id,
-                'name': h.name,
-                'phone': h.phone,
-                'metre_num': h.metre_num,
-                'grp': h.grp,
-                'parent': h.parent,
-                'prev_user': h.prev_user or 0,
-                'prev_sup': h.prev_sup or 0,
-                'cur_user': h.cur_user or 0,
-                'cur_sup': h.cur_sup or 0,
-                'mid_user': h.mid_user or 0,
-                'mid_sup': h.mid_sup or 0,
-                'units_used': h.units_used or 0,
-                'rate': h.rate or 0,
-                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
-                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
-                'cycle_month': h.cycle_month,
-                'recorded_by': h.recorded_by,
-                'role': h.role,
-                'version': h.version,
-                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
-            })
-        
-        # Get summary statistics
+            qs = qs.filter(recorded_by__icontains=recorded_by)
+
+        total_count = qs.count()
+        qs = qs.order_by('-timestamp')
+        page_qs = qs[offset:offset + page_size]
+
+        data = [_serialize_reading_history(h) for h in page_qs]
+
         summary = {
             'total_records': total_count,
-            'total_units': history_qs.aggregate(total=Sum('units_used'))['total'] or 0,
+            'total_units': page_qs.aggregate(total=Sum('units_used'))['total'] or 0,
             'unique_customers': ReadingHistory.objects.values('user_id').distinct().count(),
             'latest_cycle': ReadingHistory.objects.order_by('-cycle_month').values('cycle_month').first(),
             'filters_applied': {
-                'user_id': user_id,
-                'cycle_month': cycle_month,
-                'start_date': start_date,
-                'end_date': end_date,
-                'search': search,
-                'recorded_by': recorded_by
+                'user_id': user_id, 'cycle_month': cycle_month, 'start_date': start_date,
+                'end_date': end_date, 'search': search, 'recorded_by': recorded_by
             }
         }
-        
+
         return Response({
             'success': True,
             'data': data,
             'summary': summary,
             'pagination': {
-                'page': page,
-                'page_size': page_size,
-                'total_count': total_count,
+                'page': page, 'page_size': page_size, 'total_count': total_count,
                 'total_pages': (total_count + page_size - 1) // page_size
             }
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 def get_reading_history_by_user(request, user_id):
-    """
-    Fetch reading history for a specific user.
-    """
+    """Fetch reading history for a specific user."""
     try:
-        reading_history = ReadingHistory.objects.filter(
-            user_id=user_id
-        ).order_by('-timestamp')
-        
-        if not reading_history.exists():
-            return Response({
-                'success': True,
-                'data': [],
-                'message': 'No reading history found for this user'
-            })
-        
-        data = []
-        for h in reading_history:
-            data.append({
-                'id': h.id,
-                'reading_id': h.reading_id,
-                'user_id': h.user_id,
-                'name': h.name,
-                'phone': h.phone,
-                'metre_num': h.metre_num,
-                'grp': h.grp,
-                'parent': h.parent,
-                'prev_user': h.prev_user or 0,
-                'prev_sup': h.prev_sup or 0,
-                'cur_user': h.cur_user or 0,
-                'cur_sup': h.cur_sup or 0,
-                'mid_user': h.mid_user or 0,
-                'mid_sup': h.mid_sup or 0,
-                'units_used': h.units_used or 0,
-                'rate': h.rate or 0,
-                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
-                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
-                'cycle_month': h.cycle_month,
-                'recorded_by': h.recorded_by,
-                'role': h.role,
-                'version': h.version,
-                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
-            })
-        
+        qs = ReadingHistory.objects.filter(user_id=user_id).order_by('-timestamp')
+        if not qs.exists():
+            return Response({'success': True, 'data': [], 'message': 'No reading history found for this user'})
+
+        data = [_serialize_reading_history(h) for h in qs]
+
         return Response({
             'success': True,
             'user_id': user_id,
@@ -3088,132 +2335,67 @@ def get_reading_history_by_user(request, user_id):
                 'latest_reading': data[0] if data else None
             }
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 def get_reading_history_summary(request):
-    """
-    Get summary statistics of all reading history.
-    """
+    """Get summary statistics of all reading history."""
     try:
-        # Get filter parameters
         cycle_month = request.GET.get('cycle_month')
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
-        
-        history_qs = ReadingHistory.objects.all()
-        
+
+        qs = ReadingHistory.objects.all()
         if cycle_month:
-            history_qs = history_qs.filter(cycle_month=cycle_month)
+            qs = qs.filter(cycle_month=cycle_month)
         if start_date:
-            history_qs = history_qs.filter(reading_date__gte=start_date)
+            qs = qs.filter(reading_date__gte=start_date)
         if end_date:
-            history_qs = history_qs.filter(reading_date__lte=end_date)
-        
-        # Aggregations
-        total_readings = history_qs.count()
-        total_units = history_qs.aggregate(
-            total=Sum('units_used')
-        )['total'] or 0
-        
-        # Cycle breakdown
-        cycle_breakdown = history_qs.values('cycle_month').annotate(
-            count=Count('id'),
-            total_units=Sum('units_used'),
+            qs = qs.filter(reading_date__lte=end_date)
+
+        total_readings = qs.count()
+        total_units = qs.aggregate(total=Sum('units_used'))['total'] or 0
+
+        cycle_breakdown = qs.values('cycle_month').annotate(
+            count=Count('id'), total_units=Sum('units_used'),
             unique_customers=Count('user_id', distinct=True)
         ).order_by('-cycle_month')
-        
-        # Recorded by breakdown
-        recorded_by_breakdown = history_qs.values('recorded_by').annotate(
-            count=Count('id')
-        ).order_by('-count')
-        
-        # Daily trend (last 30 days)
-        daily_trend = history_qs.values('reading_date').annotate(
-            count=Count('id'),
-            total_units=Sum('units_used')
+
+        recorded_by_breakdown = qs.values('recorded_by').annotate(count=Count('id')).order_by('-count')
+
+        daily_trend = qs.values('reading_date').annotate(
+            count=Count('id'), total_units=Sum('units_used')
         ).order_by('-reading_date')[:30]
-        
+
         return Response({
             'success': True,
             'summary': {
                 'total_readings': total_readings,
                 'total_units': float(total_units),
                 'average_units': float(total_units / total_readings) if total_readings > 0 else 0,
-                'unique_customers': history_qs.values('user_id').distinct().count()
+                'unique_customers': qs.values('user_id').distinct().count()
             },
             'cycle_breakdown': list(cycle_breakdown),
             'recorded_by_breakdown': list(recorded_by_breakdown),
             'daily_trend': list(daily_trend)
         })
-        
     except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def get_reading_history_json(request):
-    """
-    Simple JSON response version of reading history.
-    This uses regular Django JsonResponse instead of DRF.
-    """
+    """Simple JsonResponse (non-DRF) version of the full reading history."""
     try:
-        # Get all reading history
-        history = ReadingHistory.objects.all().order_by('-timestamp')
-        
-        # Prepare data
-        data = []
-        for h in history:
-            data.append({
-                'id': h.id,
-                'reading_id': h.reading_id,
-                'user_id': h.user_id,
-                'name': h.name,
-                'phone': h.phone,
-                'metre_num': h.metre_num,
-                'grp': h.grp,
-                'parent': h.parent,
-                'prev_user': h.prev_user or 0,
-                'prev_sup': h.prev_sup or 0,
-                'cur_user': h.cur_user or 0,
-                'cur_sup': h.cur_sup or 0,
-                'mid_user': h.mid_user or 0,
-                'mid_sup': h.mid_sup or 0,
-                'units_used': h.units_used or 0,
-                'rate': h.rate or 0,
-                'reading_date': h.reading_date.strftime('%Y-%m-%d') if h.reading_date else None,
-                'prev_date': h.prev_date.strftime('%Y-%m-%d') if h.prev_date else None,
-                'cycle_month': h.cycle_month,
-                'recorded_by': h.recorded_by,
-                'role': h.role,
-                'version': h.version,
-                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M:%S') if h.timestamp else None
-            })
-        
-        # Get summary
-        total_units = ReadingHistory.objects.aggregate(
-            total=Sum('units_used')
-        )['total'] or 0
-        
+        history_qs = ReadingHistory.objects.all().order_by('-timestamp')
+        data = [_serialize_reading_history(h) for h in history_qs]
+        total_units = ReadingHistory.objects.aggregate(total=Sum('units_used'))['total'] or 0
+
         return JsonResponse({
             'success': True,
             'data': data,
-            'summary': {
-                'total_records': len(data),
-                'total_units': float(total_units)
-            }
+            'summary': {'total_records': len(data), 'total_units': float(total_units)}
         })
-        
     except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=500)
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
