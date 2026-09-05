@@ -934,7 +934,7 @@ def submit_new_reading(request):
 
                 create_reading_history(reading, user_name, role)
 
-                bill_amount = compute_bill_amount(reading.units_used, reading.rate, zero_threshold=0)
+                bill_amount = compute_bill_amount(reading.units_used, reading.rate, zero_threshold=2)
                 apply_new_billing_cycle(reading, bill_amount, user_name, role)
 
                 create_audit_trail(
