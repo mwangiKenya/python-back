@@ -289,7 +289,7 @@ def compute_billing_status(paid, total_due):
     return "Paid"
 
 
-def compute_bill_amount(units_used, rate, zero_threshold=0, flat_fee=300):
+def compute_bill_amount(units_used, rate, zero_threshold=2, flat_fee=300):
     """Metered bill (units * rate), or a flat fee when usage is at/below the threshold."""
     units_used = units_used or 0
     if units_used <= zero_threshold:
