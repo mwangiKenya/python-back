@@ -1426,64 +1426,86 @@ from .models import Billings
 
 
 def download_billings_template(request):
-    # Path to your Excel template
     template_path = os.path.join(
         settings.BASE_DIR,
         "templates",
         "Billings.xlsx"
     )
+
     # Load the existing Excel template
-    workbook = load_workbook(template_path)
-    sheet = workbook.active
+    wb = load_workbook(template_path)
+    ws = wb.active
+
     # Get billing records from the database
-    billings = Billings.objects.all().order_by("id")
-    # Start inserting data from row 6
-    start_row = 6
-    for row_number, billing in enumerate(billings, start=start_row):
+    billings_data = Billings.objects.all().order_by("id")
+
+    # Start inserting customer data from row 6
+    row = 6
+
+    for billing in billings_data:
+
         # A - ID
-        sheet.cell(row=row_number, column=1).value = billing.id
+        ws.cell(row=row, column=1).value = billing.id
+
         # B - Name
-        sheet.cell(row=row_number, column=2).value = billing.name
+        ws.cell(row=row, column=2).value = billing.name
+
         # C - Phone
-        sheet.cell(row=row_number, column=3).value = billing.phone
+        ws.cell(row=row, column=3).value = billing.phone
+
         # D - Units Used
-        sheet.cell(row=row_number, column=4).value = billing.unit_used
+        ws.cell(row=row, column=4).value = billing.units_used
+
         # E - Rate
-        sheet.cell(row=row_number, column=5).value = billing.rate
+        ws.cell(row=row, column=5).value = billing.rate
+
         # F - Bill
-        sheet.cell(row=row_number, column=6).value = billing.bill
-        # G - Previous Balance
-        sheet.cell(row=row_number, column=7).value = billing.b_cd
+        ws.cell(row=row, column=6).value = billing.bill
+
+        # G - B_CD / Previous Balance
+        ws.cell(row=row, column=7).value = billing.b_cd
+
         # H - Penalty
-        sheet.cell(row=row_number, column=8).value = billing.penalty
-        # I - Total To Pay
-        sheet.cell(row=row_number, column=9).value = (
-            (billing.bill or 0)
-            + (billing.b_cd or 0)
-            + (billing.penalty or 0)
-        )
+        ws.cell(row=row, column=8).value = billing.penalty
+
+        # I - Bill + B_CD + Penalty
+        bill = billing.bill or Decimal("0")
+        b_cd = billing.b_cd or Decimal("0")
+        penalty = billing.penalty or Decimal("0")
+
+        ws.cell(row=row, column=9).value = bill + b_cd + penalty
+
         # J - Amount Paid
-        # Leave this EMPTY so the user can enter payment
-        sheet.cell(row=row_number, column=10).value = None
+        # Leave this blank for the user to enter payment
+        ws.cell(row=row, column=10).value = None
+
         # K - Balance
-        # Formula: I - J
-        sheet.cell(row=row_number, column=11).value = (
-            f"=I{row_number}-J{row_number}"
-        )
-    # Prepare the response
+        # I - J
+        ws.cell(row=row, column=11).value = f"=I{row}-J{row}"
+
+        row += 1
+
+    # Tell Excel to recalculate formulas when the file is opened
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
+    wb.calculation.calcMode = "auto"
+
+    # Create Excel response
     response = HttpResponse(
         content_type=(
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
         )
     )
+
     response["Content-Disposition"] = (
         'attachment; filename="billings_template.xlsx"'
     )
-    # Save workbook directly to the response
-    workbook.save(response)
-    return response
 
+    # Save workbook directly to response
+    wb.save(response)
+
+    return response
 @csrf_exempt
 def upload_billings_excel(request):
     if request.method != "POST":
