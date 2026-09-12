@@ -1417,16 +1417,72 @@ def upload_readings_excel(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def download_billings_template(request):
-    data = Billings.objects.all().values("id", "name", "phone", "bill", "paid")
-    df = pd.DataFrame(list(data))
-    response = HttpResponse(
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
-    response['Content-Disposition'] = 'attachment; filename=billings_template.xlsx'
-    df.to_excel(response, index=False)
-    return response
+import os
+from django.http import HttpResponse
+from openpyxl import load_workbook
+from django.conf import settings
 
+from .models import Billings
+
+
+def download_billings_template(request):
+    # Path to your Excel template
+    template_path = os.path.join(
+        settings.BASE_DIR,
+        "templates",
+        "Billings.xlsx"
+    )
+    # Load the existing Excel template
+    workbook = load_workbook(template_path)
+    sheet = workbook.active
+    # Get billing records from the database
+    billings = Billings.objects.all().order_by("id")
+    # Start inserting data from row 6
+    start_row = 6
+    for row_number, billing in enumerate(billings, start=start_row):
+        # A - ID
+        sheet.cell(row=row_number, column=1).value = billing.id
+        # B - Name
+        sheet.cell(row=row_number, column=2).value = billing.name
+        # C - Phone
+        sheet.cell(row=row_number, column=3).value = billing.phone
+        # D - Units Used
+        sheet.cell(row=row_number, column=4).value = billing.unit_used
+        # E - Rate
+        sheet.cell(row=row_number, column=5).value = billing.rate
+        # F - Bill
+        sheet.cell(row=row_number, column=6).value = billing.bill
+        # G - Previous Balance
+        sheet.cell(row=row_number, column=7).value = billing.b_cd
+        # H - Penalty
+        sheet.cell(row=row_number, column=8).value = billing.penalty
+        # I - Total To Pay
+        sheet.cell(row=row_number, column=9).value = (
+            (billing.bill or 0)
+            + (billing.b_cd or 0)
+            + (billing.penalty or 0)
+        )
+        # J - Amount Paid
+        # Leave this EMPTY so the user can enter payment
+        sheet.cell(row=row_number, column=10).value = None
+        # K - Balance
+        # Formula: I - J
+        sheet.cell(row=row_number, column=11).value = (
+            f"=I{row_number}-J{row_number}"
+        )
+    # Prepare the response
+    response = HttpResponse(
+        content_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        )
+    )
+    response["Content-Disposition"] = (
+        'attachment; filename="billings_template.xlsx"'
+    )
+    # Save workbook directly to the response
+    workbook.save(response)
+    return response
 
 @csrf_exempt
 def upload_billings_excel(request):
