@@ -1490,13 +1490,174 @@ def download_billings_template(request):
     # Save workbook directly to response
     wb.save(response)
     return response
+"""
+Drop-in replacement for the single `upload_billings_excel` view.
+
+WHERE TO PUT THIS:
+Replace the existing `upload_billings_excel` function in views.py with the
+four functions below (upload / extract / commit / rollback). Everything
+else in views.py (including `download_billings_template`) stays untouched.
+
+ADDITIONAL IMPORT NEEDED at the top of views.py:
+    import uuid
+
+URLS.PY — add these three new routes (upload-billings-excel/ already exists,
+keep it pointing at the new `upload_billings_excel`):
+
+    
+
+HOW IT WORKS:
+1. upload_billings_excel   -> saves the file to a temp folder under a random
+                               token. Does NOT touch the database.
+2. extract_billings_excel  -> reads that temp file, computes what paid/bal/
+                               status WOULD become for each row (using the
+                               exact same math as the DB update path), and
+                               returns it as a preview. Still does NOT touch
+                               the database.
+3. commit_billings_excel   -> re-reads the same temp file and actually calls
+                               apply_payment(...) for every row (this is the
+                               original upload_billings_excel logic), then
+                               deletes the temp file.
+4. rollback_billings_excel -> deletes the temp file. Since nothing was ever
+                               written to the DB, there's nothing to undo on
+                               the server side — the frontend restores its
+                               own table from the snapshot it took before
+                               extraction.
+"""
+
+import uuid  # add to the top-level imports in views.py
+
+# Folder where "pending" (not-yet-committed) billing uploads are stored.
+PENDING_BILLINGS_UPLOAD_DIR = os.path.join(settings.BASE_DIR, "temp_uploads", "billings")
+os.makedirs(PENDING_BILLINGS_UPLOAD_DIR, exist_ok=True)
+
+
+def _pending_upload_path(token):
+    # Guard against path traversal — token is always a uuid4 hex string.
+    safe_token = "".join(ch for ch in str(token) if ch.isalnum())
+    return os.path.join(PENDING_BILLINGS_UPLOAD_DIR, f"{safe_token}.xlsx")
+
+
 @csrf_exempt
 def upload_billings_excel(request):
+    """
+    Step 1: Receive the Excel file and store it on disk under a token.
+    This does NOT parse the file or touch the database in any way.
+    """
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
-        file = request.FILES["file"]
-        df = pd.read_excel(file)
+        file = request.FILES.get("file")
+        if not file:
+            return JsonResponse({"error": "No file uploaded"}, status=400)
+
+        token = uuid.uuid4().hex
+        saved_path = _pending_upload_path(token)
+
+        with open(saved_path, "wb+") as dest:
+            for chunk in file.chunks():
+                dest.write(chunk)
+
+        return JsonResponse({
+            "message": "Sheet uploaded successfully. Click \"Extract Data\" to preview the changes.",
+            "token": token
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def extract_billings_excel(request):
+    """
+    Step 2: Parse the previously uploaded file (identified by token) and
+    calculate what paid/bal/status WOULD become for each billing row.
+    Nothing is saved to the database — this is a preview only.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        data = json.loads(request.body) if request.body else {}
+        token = data.get("token")
+        if not token:
+            return JsonResponse({"error": "Missing upload token"}, status=400)
+
+        saved_path = _pending_upload_path(token)
+        if not os.path.exists(saved_path):
+            return JsonResponse(
+                {"error": "Upload not found or already processed. Please upload the sheet again."},
+                status=404
+            )
+
+        df = pd.read_excel(saved_path)
+        preview = []
+        errors = []
+
+        for index, row in df.iterrows():
+            try:
+                billing_id = row.get("id")
+                paid = row.get("paid")
+                if pd.isna(billing_id) or pd.isna(paid):
+                    continue
+
+                billing = Billings.objects.filter(id=int(billing_id)).first()
+                if not billing:
+                    errors.append(f"Row {index}: Billing ID {int(billing_id)} not found")
+                    continue
+
+                new_paid = Decimal(str(paid))
+                penalty = billing.penalty or Decimal("0")
+                total_due = (billing.bill or 0) + (billing.b_cd or 0) + penalty
+                new_bal = total_due - new_paid
+                new_status = compute_billing_status(new_paid, total_due)
+
+                preview.append({
+                    "id": billing.id,
+                    "paid": float(new_paid),
+                    "bal": float(new_bal),
+                    "status": new_status
+                })
+            except Exception as row_error:
+                errors.append(f"Row {index}: {str(row_error)}")
+
+        if not preview:
+            return JsonResponse({
+                "error": "No valid rows could be extracted from this sheet. Please check it and try again.",
+                "row_errors": errors[:10]
+            }, status=400)
+
+        return JsonResponse({
+            "message": f"Data extracted successfully — {len(preview)} record(s) ready for review. Nothing has been saved yet.",
+            "preview": preview,
+            "errors": errors[:10],
+            "token": token
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def commit_billings_excel(request):
+    """
+    Step 3a: Re-read the same temp file and actually persist the payments
+    to the database (identical logic to the original upload_billings_excel),
+    then delete the temp file since it's no longer "pending".
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        data = json.loads(request.body) if request.body else {}
+        token = data.get("token")
+        if not token:
+            return JsonResponse({"error": "Missing upload token"}, status=400)
+
+        saved_path = _pending_upload_path(token)
+        if not os.path.exists(saved_path):
+            return JsonResponse(
+                {"error": "Upload not found or already processed. Please upload the sheet again."},
+                status=404
+            )
+
+        df = pd.read_excel(saved_path)
         updated = []
         errors = []
 
@@ -1514,19 +1675,38 @@ def upload_billings_excel(request):
 
                     receipt, old_paid, _ = apply_payment(
                         billing, new_paid, previous_balance, 'EXCEL',
-                        username="excel_upload", role="system"
+                        username=data.get("username", "excel_upload"),
+                        role=data.get("role", "system")
                     )
 
                     create_log(
-                        "excel_upload", "system", "UPDATE", "billings", billing.id,
+                        data.get("username", "excel_upload"), data.get("role", "system"),
+                        "UPDATE", "billings", billing.id,
                         f"Excel update: {old_paid} → {new_paid}", "paid", old_paid, new_paid
                     )
-                    updated.append(billing.id)
+                    updated.append({
+                        "id": billing.id, "paid": billing.paid,
+                        "bal": billing.bal, "status": billing.status
+                    })
                 except Exception as e:
                     errors.append(f"Row {index}: {str(e)}")
 
+            create_audit_trail(
+                username=data.get("username", "excel_upload"), role=data.get("role", "system"),
+                action="BULK_UPLOAD", table_name="billings",
+                description=f"Excel billing upload committed: {len(updated)} record(s) updated",
+                request=request
+            )
+
+        # Now that it's permanently saved, the pending file can go
+        try:
+            os.remove(saved_path)
+        except OSError:
+            pass
+
         return JsonResponse({
-            "message": "Excel uploaded successfully",
+            "message": "Committed successfully — payments have been permanently saved to the database.",
+            "updated": updated,
             "updated_count": len(updated),
             "errors": errors[:10]
         })
@@ -1534,6 +1714,30 @@ def upload_billings_excel(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@csrf_exempt
+def rollback_billings_excel(request):
+    """
+    Step 3b: Discard the pending upload. Since extraction never wrote to the
+    database, there's nothing to undo server-side beyond deleting the temp
+    file — the frontend restores its own table from its pre-extraction
+    snapshot.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        data = json.loads(request.body) if request.body else {}
+        token = data.get("token")
+
+        if token:
+            saved_path = _pending_upload_path(token)
+            if os.path.exists(saved_path):
+                os.remove(saved_path)
+
+        return JsonResponse({
+            "message": "Rolled back — no changes were saved. The billing table has been restored."
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 def download_users_excel(request):
     users = read_users.objects.all().values(
         "id", "fname", "phone", "metre_num", "zone", "rate", "grp", "parent", "created_on"
