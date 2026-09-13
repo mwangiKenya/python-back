@@ -1443,6 +1443,8 @@ def download_billings_template(request):
     row = 6
 
     for billing in billings_data:
+        #total customers
+        ws.cell(row=2, column=9).value=total_cust
 
         # A - ID
         ws.cell(row=row, column=1).value = billing.id
