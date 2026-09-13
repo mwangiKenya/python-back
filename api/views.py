@@ -4,11 +4,9 @@ from django.db import transaction
 from django.db.models import Sum, Avg, Count, Q
 from django.conf import settings
 from django.utils import timezone
-
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-
 import json
 import os
 import calendar
@@ -17,16 +15,13 @@ from io import BytesIO
 from textwrap import wrap
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-
 import pandas as pd
 import requests
 from openpyxl import load_workbook
-
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-
 from .models import (
     read_users, readings, Admin, Billings, Logs, Users, history,
     ReadingHistory, PaymentHistory, BillingHistory, AuditTrail,
@@ -1417,12 +1412,6 @@ def upload_readings_excel(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-import os
-from django.http import HttpResponse
-from openpyxl import load_workbook
-from django.conf import settings
-
-from .models import Billings
 
 
 def download_billings_template(request):
@@ -1490,45 +1479,7 @@ def download_billings_template(request):
     # Save workbook directly to response
     wb.save(response)
     return response
-"""
-Drop-in replacement for the single `upload_billings_excel` view.
 
-WHERE TO PUT THIS:
-Replace the existing `upload_billings_excel` function in views.py with the
-four functions below (upload / extract / commit / rollback). Everything
-else in views.py (including `download_billings_template`) stays untouched.
-
-ADDITIONAL IMPORT NEEDED at the top of views.py:
-    import uuid
-(load_workbook from openpyxl is already imported in views.py for the
-download functions, so no new import is needed for that.)
-
-URLS.PY — add these three new routes (upload-billings-excel/ already exists,
-keep it pointing at the new `upload_billings_excel`):
-
-    path('api/upload-billings-excel/', views.upload_billings_excel),
-    path('api/extract-billings-excel/', views.extract_billings_excel),
-    path('api/commit-billings-excel/', views.commit_billings_excel),
-    path('api/rollback-billings-excel/', views.rollback_billings_excel),
-
-HOW IT WORKS:
-1. upload_billings_excel   -> saves the file to a temp folder under a random
-                               token. Does NOT touch the database.
-2. extract_billings_excel  -> reads that temp file, computes what paid/bal/
-                               status WOULD become for each row (using the
-                               exact same math as the DB update path), and
-                               returns it as a preview. Still does NOT touch
-                               the database.
-3. commit_billings_excel   -> re-reads the same temp file and actually calls
-                               apply_payment(...) for every row (this is the
-                               original upload_billings_excel logic), then
-                               deletes the temp file.
-4. rollback_billings_excel -> deletes the temp file. Since nothing was ever
-                               written to the DB, there's nothing to undo on
-                               the server side — the frontend restores its
-                               own table from the snapshot it took before
-                               extraction.
-"""
 
 import uuid  # add to the top-level imports in views.py
 
@@ -1544,18 +1495,7 @@ def _pending_upload_path(token):
 
 
 def _read_pending_billing_rows(path, start_row=6, id_col=1, paid_col=10):
-    """
-    Reads (row_number, billing_id, paid) directly from FIXED cell positions —
-    the same ones download_billings_template() writes to: column A (1) = ID,
-    column J (10) = Amount Paid, data starting at row 6.
-
-    We deliberately do NOT use pandas' header-based column lookup here: the
-    template has two metadata rows above the real header (row 2: totals/
-    cycle/date) and the actual column labels on row 5, so pandas' default
-    "row 1 is the header" assumption misreads the file and every row gets
-    silently skipped. Reading by fixed position sidesteps that entirely and
-    matches the template's real layout.
-    """
+    
     wb = load_workbook(path, data_only=True)
     ws = wb.active
 
@@ -1576,10 +1516,7 @@ def _read_pending_billing_rows(path, start_row=6, id_col=1, paid_col=10):
 
 @csrf_exempt
 def upload_billings_excel(request):
-    """
-    Step 1: Receive the Excel file and store it on disk under a token.
-    This does NOT parse the file or touch the database in any way.
-    """
+    
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
@@ -1604,11 +1541,7 @@ def upload_billings_excel(request):
 
 @csrf_exempt
 def extract_billings_excel(request):
-    """
-    Step 2: Parse the previously uploaded file (identified by token) and
-    calculate what paid/bal/status WOULD become for each billing row.
-    Nothing is saved to the database — this is a preview only.
-    """
+    
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
@@ -1672,11 +1605,7 @@ def extract_billings_excel(request):
 
 @csrf_exempt
 def commit_billings_excel(request):
-    """
-    Step 3a: Re-read the same temp file and actually persist the payments
-    to the database (identical logic to the original upload_billings_excel),
-    then delete the temp file since it's no longer "pending".
-    """
+    
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
@@ -1750,12 +1679,7 @@ def commit_billings_excel(request):
 
 @csrf_exempt
 def rollback_billings_excel(request):
-    """
-    Step 3b: Discard the pending upload. Since extraction never wrote to the
-    database, there's nothing to undo server-side beyond deleting the temp
-    file — the frontend restores its own table from its pre-extraction
-    snapshot.
-    """
+    
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
