@@ -1444,9 +1444,12 @@ def download_billings_template(request):
     #CALCULATE THE REQUIRED METRICS
     total_customers = Billings.objects.count()
 
+
     for billing in billings_data:
         #total customers
         ws.cell(row=2, column=9).value=total_customers
+        ws.cell(row=2, column=3).value='Aug-2026'
+        ws.cell(row=2, column=6).value='31-Aug-26'
 
         # A - ID
         ws.cell(row=row, column=1).value = billing.id
