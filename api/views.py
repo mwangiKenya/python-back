@@ -1500,11 +1500,16 @@ else in views.py (including `download_billings_template`) stays untouched.
 
 ADDITIONAL IMPORT NEEDED at the top of views.py:
     import uuid
+(load_workbook from openpyxl is already imported in views.py for the
+download functions, so no new import is needed for that.)
 
 URLS.PY — add these three new routes (upload-billings-excel/ already exists,
 keep it pointing at the new `upload_billings_excel`):
 
-    
+    path('api/upload-billings-excel/', views.upload_billings_excel),
+    path('api/extract-billings-excel/', views.extract_billings_excel),
+    path('api/commit-billings-excel/', views.commit_billings_excel),
+    path('api/rollback-billings-excel/', views.rollback_billings_excel),
 
 HOW IT WORKS:
 1. upload_billings_excel   -> saves the file to a temp folder under a random
@@ -1536,6 +1541,37 @@ def _pending_upload_path(token):
     # Guard against path traversal — token is always a uuid4 hex string.
     safe_token = "".join(ch for ch in str(token) if ch.isalnum())
     return os.path.join(PENDING_BILLINGS_UPLOAD_DIR, f"{safe_token}.xlsx")
+
+
+def _read_pending_billing_rows(path, start_row=6, id_col=1, paid_col=10):
+    """
+    Reads (row_number, billing_id, paid) directly from FIXED cell positions —
+    the same ones download_billings_template() writes to: column A (1) = ID,
+    column J (10) = Amount Paid, data starting at row 6.
+
+    We deliberately do NOT use pandas' header-based column lookup here: the
+    template has two metadata rows above the real header (row 2: totals/
+    cycle/date) and the actual column labels on row 5, so pandas' default
+    "row 1 is the header" assumption misreads the file and every row gets
+    silently skipped. Reading by fixed position sidesteps that entirely and
+    matches the template's real layout.
+    """
+    wb = load_workbook(path, data_only=True)
+    ws = wb.active
+
+    rows = []
+    for row_num in range(start_row, ws.max_row + 1):
+        billing_id = ws.cell(row=row_num, column=id_col).value
+        paid = ws.cell(row=row_num, column=paid_col).value
+
+        if billing_id is None or paid is None:
+            continue
+        if isinstance(paid, str) and paid.strip() == "":
+            continue
+
+        rows.append((row_num, billing_id, paid))
+
+    return rows
 
 
 @csrf_exempt
@@ -1588,20 +1624,19 @@ def extract_billings_excel(request):
                 status=404
             )
 
-        df = pd.read_excel(saved_path)
+        try:
+            rows = _read_pending_billing_rows(saved_path)
+        except Exception as read_error:
+            return JsonResponse({"error": f"Could not read the Excel file: {read_error}"}, status=400)
+
         preview = []
         errors = []
 
-        for index, row in df.iterrows():
+        for row_num, billing_id, paid in rows:
             try:
-                billing_id = row.get("id")
-                paid = row.get("paid")
-                if pd.isna(billing_id) or pd.isna(paid):
-                    continue
-
                 billing = Billings.objects.filter(id=int(billing_id)).first()
                 if not billing:
-                    errors.append(f"Row {index}: Billing ID {int(billing_id)} not found")
+                    errors.append(f"Row {row_num}: Billing ID {billing_id} not found")
                     continue
 
                 new_paid = Decimal(str(paid))
@@ -1617,11 +1652,11 @@ def extract_billings_excel(request):
                     "status": new_status
                 })
             except Exception as row_error:
-                errors.append(f"Row {index}: {str(row_error)}")
+                errors.append(f"Row {row_num}: {str(row_error)}")
 
         if not preview:
             return JsonResponse({
-                "error": "No valid rows could be extracted from this sheet. Please check it and try again.",
+                "error": "No valid rows could be extracted from this sheet (expected data in rows 6+, ID in column A, Paid in column J). Please check it and try again.",
                 "row_errors": errors[:10]
             }, status=400)
 
@@ -1657,18 +1692,17 @@ def commit_billings_excel(request):
                 status=404
             )
 
-        df = pd.read_excel(saved_path)
+        try:
+            rows = _read_pending_billing_rows(saved_path)
+        except Exception as read_error:
+            return JsonResponse({"error": f"Could not read the Excel file: {read_error}"}, status=400)
+
         updated = []
         errors = []
 
         with transaction.atomic():
-            for index, row in df.iterrows():
+            for row_num, billing_id, paid in rows:
                 try:
-                    billing_id = row.get("id")
-                    paid = row.get("paid")
-                    if pd.isna(billing_id) or pd.isna(paid):
-                        continue
-
                     billing = Billings.objects.get(id=int(billing_id))
                     new_paid = Decimal(str(paid))
                     previous_balance = billing.bal
@@ -1689,7 +1723,7 @@ def commit_billings_excel(request):
                         "bal": billing.bal, "status": billing.status
                     })
                 except Exception as e:
-                    errors.append(f"Row {index}: {str(e)}")
+                    errors.append(f"Row {row_num}: {str(e)}")
 
             create_audit_trail(
                 username=data.get("username", "excel_upload"), role=data.get("role", "system"),
