@@ -1424,7 +1424,7 @@ def download_billings_template(request):
     wb = load_workbook(template_path)
     ws = wb.active
     # Get billing records from the database
-    billings_data = Billings.objects.all().order_by("id")
+    billings_data = Billings.objects.all().order_by("user_id")
     # Start inserting customer data from row 6
     row = 6
     #CALCULATE THE REQUIRED METRICS
@@ -1435,7 +1435,7 @@ def download_billings_template(request):
         ws.cell(row=2, column=3).value='Aug-2026'
         ws.cell(row=2, column=6).value='31-Aug-26'
         # A - ID
-        ws.cell(row=row, column=1).value = billing.id
+        ws.cell(row=row, column=1).value = billing.user_id
         # B - Name
         ws.cell(row=row, column=2).value = billing.name
         # C - Phone
