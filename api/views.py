@@ -1304,7 +1304,141 @@ def delete_employee(request, emp_id):
     except Users.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
 
+from django.contrib.auth.hashers import check_password, make_password
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
+
+@api_view(['POST'])
+def change_password(request):
+
+    try:
+        username = request.data.get("username")
+        current_password = request.data.get("current_password")
+        new_password = request.data.get("new_password")
+
+        # ------------------------------------------------------------
+        # Validate fields
+        # ------------------------------------------------------------
+
+        if not username or not current_password or not new_password:
+            return Response(
+                {
+                    "error": "Username, current password and new password are required."
+                },
+                status=400
+            )
+
+
+        # ------------------------------------------------------------
+        # Validate new password
+        # ------------------------------------------------------------
+
+        if len(new_password) < 6:
+            return Response(
+                {
+                    "error": "New password must be at least 6 characters."
+                },
+                status=400
+            )
+
+
+        # ------------------------------------------------------------
+        # Find user
+        # ------------------------------------------------------------
+
+        user = Users.objects.filter(username=username).first()
+
+        if not user:
+            return Response(
+                {
+                    "error": "User not found."
+                },
+                status=404
+            )
+
+
+        # ------------------------------------------------------------
+        # Verify current password
+        # ------------------------------------------------------------
+
+        if not check_password(current_password, user.password):
+            return Response(
+                {
+                    "error": "Current password is incorrect."
+                },
+                status=401
+            )
+
+
+        # ------------------------------------------------------------
+        # Prevent same password
+        # ------------------------------------------------------------
+
+        if check_password(new_password, user.password):
+            return Response(
+                {
+                    "error": "New password must be different from the current password."
+                },
+                status=400
+            )
+
+
+        # ------------------------------------------------------------
+        # Hash new password
+        # ------------------------------------------------------------
+
+        user.password = make_password(new_password)
+
+        user.save(update_fields=["password"])
+
+
+        # ------------------------------------------------------------
+        # Create system log
+        # ------------------------------------------------------------
+
+        create_log(
+            user.username,
+            user.role,
+            "PASSWORD_CHANGE",
+            "users",
+            user.id,
+            f"{user.username} changed their password"
+        )
+
+
+        # ------------------------------------------------------------
+        # Create audit trail
+        # ------------------------------------------------------------
+
+        create_audit_trail(
+            username=user.username,
+            role=user.role,
+            action="PASSWORD_CHANGE",
+            table_name="users",
+            record_id=user.id,
+            description=f"{user.username} changed their password",
+            request=request
+        )
+
+
+        return Response(
+            {
+                "message": "Password changed successfully."
+            },
+            status=200
+        )
+
+
+    except Exception as e:
+
+        return Response(
+            {
+                "error": str(e)
+            },
+            status=500
+        )
+    
 @csrf_exempt
 def update_employee(request, emp_id):
     if request.method != "PUT":
