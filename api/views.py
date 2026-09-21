@@ -27,6 +27,10 @@ from .models import (
     ReadingHistory, PaymentHistory, BillingHistory, AuditTrail,
     BillingCycleHistory, CustomerPaymentSummary
 )
+from django.contrib.auth.hashers import make_password, check_password
+from rest_framework.decorators import api_view
+
+
 
 #======================================================================================
 # LOGGING / HISTORY / AUDIT HELPERS
@@ -710,30 +714,6 @@ def login_user(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-@csrf_exempt
-def users_login(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Only POST requests allowed"}, status=405)
-    try:
-        data = json.loads(request.body)
-        user = Users.objects.filter(
-            username=data.get("username"), password=data.get("password")
-        ).first()
-        if not user:
-            return JsonResponse({"error": "Invalid credentials"}, status=401)
-
-        token = secrets.token_hex(16)
-        create_log(user.username, user.role, "LOGIN", "users", user.id,
-                   f"{user.username} logged into system")
-        create_audit_trail(
-            username=user.username, role=user.role, action="LOGIN",
-            description=f"{user.username} logged into system", request=request
-        )
-        return JsonResponse({"token": token, "username": user.username, "role": user.role})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-
 #======================================================================================
 # USER MANAGEMENT
 #======================================================================================
@@ -1183,23 +1163,131 @@ def finalize_month(request):
 #======================================================================================
 # EMPLOYEE MANAGEMENT
 #======================================================================================
+# ============================================================
+# USER LOGIN
+# ============================================================
 
+@csrf_exempt
+def users_login(request):
+    if request.method != "POST":
+        return JsonResponse(
+            {"error": "Only POST requests allowed"},
+            status=405
+        )
+    try:
+        data = json.loads(request.body)
+        username = data.get("username")
+        password = data.get("password")
+        if not username or not password:
+            return JsonResponse(
+                {"error": "Username and password are required"},
+                status=400
+            )
+        # Find user by username only
+        user = Users.objects.filter(username=username).first()
+        if not user:
+            return JsonResponse(
+                {"error": "Invalid credentials"},
+                status=401
+            )
+        # Compare entered password with hashed password
+        if not check_password(password, user.password):
+            return JsonResponse(
+                {"error": "Invalid credentials"},
+                status=401
+            )
+        # Generate login token
+        token = secrets.token_hex(16)
+        # Log login
+        create_log(
+            user.username,
+            user.role,
+            "LOGIN",
+            "users",
+            user.id,
+            f"{user.username} logged into system"
+        )
+        # Audit trail
+        create_audit_trail(
+            username=user.username,
+            role=user.role,
+            action="LOGIN",
+            description=f"{user.username} logged into system",
+            request=request
+        )
+        return JsonResponse({
+            "token": token,
+            "username": user.username,
+            "role": user.role
+        })
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"error": "Invalid JSON data"},
+            status=400
+        )
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
+# ============================================================
+# USER REGISTRATION
+# ============================================================
 @api_view(['POST'])
 def register_user(request):
+    username = request.data.get("username")
+    password = request.data.get("password")
+    role = request.data.get("role")
+    # Validate required fields
+    if not username or not password or not role:
+        return Response(
+            {
+                "error": "Username, password and role are required"
+            },
+            status=400
+        )
+    # Check whether username already exists
+    if Users.objects.filter(username=username).exists():
+        return Response(
+            {
+                "error": "Username already exists"
+            },
+            status=400
+        )
+    # Hash password before saving
+    hashed_password = make_password(password)
     user = Users.objects.create(
-        username=request.data.get('username'),
-        password=request.data.get('password'),
-        role=request.data.get('role')
+        username=username,
+        password=hashed_password,
+        role=role
     )
-    create_log("Admin", "admin", "CREATE", "users", user.id,
-               f"Admin created employee {user.username}")
+    # System log
+    create_log(
+        "Admin",
+        "admin",
+        "CREATE",
+        "users",
+        user.id,
+        f"Admin created employee {user.username}"
+    )
+    # Audit trail
     create_audit_trail(
-        username="Admin", role="admin", action="CREATE", table_name="users",
-        record_id=user.id, description=f"Admin created employee {user.username}",
+        username="Admin",
+        role="admin",
+        action="CREATE",
+        table_name="users",
+        record_id=user.id,
+        description=f"Admin created employee {user.username}",
         request=request
     )
-    return Response({"message": "User registered successfully"})
-
+    return Response(
+        {
+            "message": "User registered successfully"
+        },
+        status=201
+    )
 
 @api_view(['GET'])
 def list_employees(request):
