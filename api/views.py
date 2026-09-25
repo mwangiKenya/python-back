@@ -1801,7 +1801,7 @@ def extract_billings_excel(request):
                 new_status = compute_billing_status(new_paid, total_due)
 
                 preview.append({
-                    "id": billing.id,
+                    "id": billing.user_id,
                     "paid": float(new_paid),
                     "bal": float(new_bal),
                     "status": new_status
@@ -1866,11 +1866,11 @@ def commit_billings_excel(request):
 
                     create_log(
                         data.get("username", "excel_upload"), data.get("role", "system"),
-                        "UPDATE", "billings", billing.id,
+                        "UPDATE", "billings", billing.user_id,
                         f"Excel update: {old_paid} → {new_paid}", "paid", old_paid, new_paid
                     )
                     updated.append({
-                        "id": billing.id, "paid": billing.paid,
+                        "id": billing.user_id, "paid": billing.paid,
                         "bal": billing.bal, "status": billing.status
                     })
                 except Exception as e:
