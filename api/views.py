@@ -1789,7 +1789,7 @@ def extract_billings_excel(request):
 
         for row_num, billing_id, paid in rows:
             try:
-                billing = Billings.objects.filter(id=int(billing_id)).first()
+                billing = Billings.objects.filter(user_id=int(billing_id)).first()
                 if not billing:
                     errors.append(f"Row {row_num}: Billing ID {billing_id} not found")
                     continue
