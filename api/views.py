@@ -1854,7 +1854,7 @@ def commit_billings_excel(request):
         with transaction.atomic():
             for row_num, billing_id, paid in rows:
                 try:
-                    billing = Billings.objects.get(id=int(billing_id))
+                    billing = Billings.objects.get(user_id=int(billing_id))
                     new_paid = Decimal(str(paid))
                     previous_balance = billing.bal
 
