@@ -82,7 +82,7 @@ class Billings(models.Model):
 
     class Meta:
         ordering = ["user_id"]
-        db_table = 'billings'
+        db_table = 'billings_backup'
         managed = False
 
 
