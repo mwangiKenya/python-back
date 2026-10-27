@@ -27,3 +27,4 @@ whitenoise==6.12.0
 pandas
 openpyxl
 reportlab
+python-decouple
