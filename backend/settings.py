@@ -37,13 +37,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
-    # Third-party
     'rest_framework',
     'corsheaders',
-
-    # Local apps
     'api',
+    'readings',
+    'billings',
+    'users',
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -101,29 +100,8 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 #=================================================================
-#THE INITIAL OFFLINE DATABASE THAT WORKS ON LOCALHOST
-'''
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'kasarani',         
-        'USER': 'root',           
-        'PASSWORD': '596424309',   
-        'HOST': 'localhost',          
-        'PORT': '3306',
-    }
-}
-'''
-
-
 
 import dj_database_url
-'''
-DATABASES = {
-    'default': dj_database_url.parse(
-        "mysql://root:BXUgAzwQELWOELiKmInInChtelsIyTIm@interchange.proxy.rlwy.net:36580/railway"
-    )
-}
 '''
 DATABASES = {
     'default': {
@@ -140,6 +118,19 @@ DATABASES = {
         'CONN_MAX_AGE': 0,  # ⬅️ CRITICAL FIX
     }
 }
+#THE INITIAL OFFLINE DATABASE THAT WORKS ON LOCALHOST
+'''
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'kasarani',         
+        'USER': 'root',           
+        'PASSWORD': '596424309',   
+        'HOST': 'localhost',          
+        'PORT': '3306',
+    }
+}
+
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
@@ -202,3 +193,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 AT_USERNAME = "sandbox"
 AT_API_KEY = "atsk_5c9dfc1f83211c51983fc17708ede63184ab20f43eca418febf20fb23d868e879fbbda8d"
+
+from decouple import config
+
+ADVANTA_API_URL = "https://quicksms.advantasms.com/api/services/sendbulk"
+ADVANTA_PARTNER_ID = config("ADVANTA_PARTNER_ID")
+ADVANTA_API_KEY = config("ADVANTA_API_KEY")
+ADVANTA_SHORTCODE = config("ADVANTA_SHORTCODE")
