@@ -102,7 +102,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 #=================================================================
 
 import dj_database_url
-'''
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -113,9 +113,9 @@ DATABASES = {
         'PORT': '6543',
         'OPTIONS': {
             'sslmode': 'require',
-            'connect_timeout': 5,   # ⬅️ prevents infinite hanging
+            'connect_timeout': 5,  
         },
-        'CONN_MAX_AGE': 0,  # ⬅️ CRITICAL FIX
+        'CONN_MAX_AGE': 0,  
     }
 }
 #THE INITIAL OFFLINE DATABASE THAT WORKS ON LOCALHOST
@@ -130,6 +130,7 @@ DATABASES = {
         'PORT': '3306',
     }
 }
+'''
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
