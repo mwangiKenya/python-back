@@ -11,4 +11,7 @@ urlpatterns = [
     path('rollback-billings-excel/',views.rollback_billings_excel,name='rollback_billings_excel'),
     path('send_sms_view/', views.send_sms_view, name='send_bulk_sms'),
     path('bill/', views.bill, name='bill'),
+    path("pay-details/", views.payment_list, name="payment_list"),
+    path("pay-details/<int:pk>/", views.payment_detail, name="payment_detail"),
+    path('pay-details/active/', views.active_pay_details),
 ]

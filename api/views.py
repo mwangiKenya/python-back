@@ -1,76 +1,79 @@
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Sum, Avg, Count, Q
+from django.db.models import Sum, Avg, Count, Max, Q, F, FloatField, ExpressionWrapper
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
+from django.views.decorators.http import require_http_methods
+from collections import defaultdict
+from functools import wraps
+from datetime import date
 import json
 import secrets
-from .models import (
-    read_users, readings, Admin, Billings,  Users, BillDates
-)
-from collections import defaultdict
-from django.db.models import Avg, Count, Max, Q, Sum, F, FloatField, ExpressionWrapper
-from django.http import JsonResponse
-from django.utils import timezone
-from django.db.models.functions import TruncMonth
-from datetime import date
-from django.views.decorators.http import require_http_methods
-
-
+from api.auth import agency_required
+from .models import read_users, readings, Admin, Billings, Users, BillDates
+def safe(view):
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        try:
+            return view(request, *args, **kwargs)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    return wrapper
+def secured(view):
+    return agency_required(safe(view))
 @csrf_exempt
 def login_user(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
     try:
         data = json.loads(request.body)
-        admin = Admin.objects.filter(
-            username=data.get("username"), password=data.get("password")
-        ).first()
+        admin = Admin.objects.filter(username=data.get("username"), password=data.get("password")).first()
         if not admin:
             return JsonResponse({"error": "Invalid login credentials"}, status=401)
-        token = secrets.token_hex(32)
-        return JsonResponse({"token": token})
+        return JsonResponse({"token": secrets.token_hex(32)})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-#======================================================================================
-# ANALYTICS
-#======================================================================================
+@secured
 def total_bill(request):
-    total = Billings.objects.aggregate(v=Sum('bill'))['v'] or 0
+    total = Billings.objects.filter(agency=request.agency).aggregate(v=Sum('bill'))['v'] or 0
     return JsonResponse({"total_bill": round(float(total), 2)})
+@secured
 def total_bal(request):
-    total = Billings.objects.aggregate(v=Sum('b_cd'))['v'] or 0
+    total = Billings.objects.filter(agency=request.agency).aggregate(v=Sum('b_cd'))['v'] or 0
     return JsonResponse({"total_bal": round(float(total), 2)})
+@secured
 def total_paid(request):
-    total = Billings.objects.aggregate(v=Sum('paid'))['v'] or 0
+    total = Billings.objects.filter(agency=request.agency).aggregate(v=Sum('paid'))['v'] or 0
     return JsonResponse({"total_paid": round(float(total), 2)})
+@secured
 def total_units(request):
-    total = Billings.objects.aggregate(v=Sum('units_used'))['v'] or 0
+    total = Billings.objects.filter(agency=request.agency).aggregate(v=Sum('units_used'))['v'] or 0
     return JsonResponse({"total_units": round(float(total), 2)})
+@secured
 def total_cust(request):
-    total = read_users.objects.aggregate(v=Count('id'))['v'] or 0
+    total = read_users.objects.filter(agency=request.agency).count()
     return JsonResponse({"total_cust": total})
+@secured
 def avg_units(request):
-    avg = Billings.objects.aggregate(v=Avg('units_used'))['v'] or 0
+    avg = Billings.objects.filter(agency=request.agency).aggregate(v=Avg('units_used'))['v'] or 0
     return JsonResponse({"avg_units": round(float(avg), 2)})
-# ----------------------------------------------------------------- helpers
 OUTSTANDING = ExpressionWrapper(F('bill') + F('b_cd') - F('paid'), output_field=FloatField())
 def r2(v):
     return round(float(v or 0), 2)
 def pct(a, b):
-    return round(float(a) / float(b) * 100, 1) if b else 0
+    return round(float(a or 0) / float(b) * 100, 1) if b else 0
 def int_param(request, name, default, lo, hi):
     try:
         return max(lo, min(hi, int(request.GET.get(name, default))))
     except (TypeError, ValueError):
         return default
-def latest_cycle():
-    """(queryset of billings in the latest month, date of latest billing)."""
-    d = Billings.objects.aggregate(m=Max('billed_on'))['m']
+def latest_cycle(agency):
+    base = Billings.objects.filter(agency=agency)
+    d = base.aggregate(m=Max('billed_on'))['m']
     if not d:
         return Billings.objects.none(), None
-    return Billings.objects.filter(billed_on__year=d.year, billed_on__month=d.month), d
+    return base.filter(billed_on__year=d.year, billed_on__month=d.month), d
 def finish(billed, prev, paid, units=0, customers=0, **extra):
-    """Turn raw sums into the standard metric block."""
     billed, prev, paid = r2(billed), r2(prev), r2(paid)
     due = round(billed + prev, 2)
     units = r2(units)
@@ -82,31 +85,30 @@ def finish(billed, prev, paid, units=0, customers=0, **extra):
         'yield_per_unit': round(paid / units, 2) if units else 0,
         **extra,
     }
-def group_cycle(key):
-    """Aggregate the latest cycle by a Billings column."""
-    qs, _ = latest_cycle()
+def group_cycle(key, agency):
+    qs, _ = latest_cycle(agency)
     rows = qs.order_by().values(key).annotate(
         billed=Sum('bill'), prev=Sum('b_cd'), paid=Sum('paid'),
         units=Sum('units_used'), customers=Count('user_id', distinct=True))
-    return [finish(r['billed'], r['prev'], r['paid'], r['units'], r['customers'], **{key: r[key]})
-            for r in rows]
-# ----------------------------------------------------------------- views
+    return [finish(r['billed'], r['prev'], r['paid'], r['units'], r['customers'], **{key: r[key]}) for r in rows]
+@secured
 def analytics_summary(request):
-    """Headline numbers for the latest cycle plus operational health."""
-    qs, d = latest_cycle()
+    agency = request.agency
+    qs, d = latest_cycle(agency)
     c = qs.aggregate(billed=Sum('bill'), prev=Sum('b_cd'), paid=Sum('paid'),
                      units=Sum('units_used'), pen=Sum('penalty'),
                      cust=Count('user_id', distinct=True), n=Count('id'))
     due_expr = F('bill') + F('b_cd')
-    full = Count('id', filter=Q(paid__gte=due_expr))
-    none = Count('id', filter=Q(paid__lte=0) & ~Q(paid__gte=due_expr))
-    mix = qs.aggregate(full=full, none=none)
+    mix = qs.aggregate(full=Count('id', filter=Q(paid__gte=due_expr)),
+                       none=Count('id', filter=Q(paid__lte=0) & ~Q(paid__gte=due_expr)))
     partial = c['n'] - mix['full'] - mix['none']
-    all_time_pen = Billings.objects.aggregate(v=Sum('penalty'))['v']
-    r = readings.objects.aggregate(total=Count('id'),
-                                   done=Count('id', filter=Q(cur_user__isnull=False)),
-                                   locked=Count('id', filter=Q(cycle_locked_until__gt=timezone.now())))
-    roles = list(Users.objects.values('role').annotate(n=Count('id')).order_by('role'))
+    all_time_pen = Billings.objects.filter(agency=agency).aggregate(v=Sum('penalty'))['v']
+    r = readings.objects.filter(agency=agency).aggregate(
+        total=Count('id'),
+        done=Count('id', filter=Q(cur_user__isnull=False)),
+        locked=Count('id', filter=Q(cycle_locked_until__gt=timezone.now())))
+    staff = Users.objects.filter(agency=agency)
+    roles = list(staff.values('role').annotate(n=Count('id')).order_by('role'))
     out = finish(c['billed'], c['prev'], c['paid'], c['units'], c['cust'])
     return JsonResponse({
         'cycle': d.strftime('%B %Y') if d else None,
@@ -118,12 +120,12 @@ def analytics_summary(request):
         'readings_total': r['total'], 'readings_done': r['done'],
         'reading_completion': pct(r['done'], r['total']),
         'locked_readings': r['locked'],
-        'staff': {'users': sum(x['n'] for x in roles), 'admins': Admin.objects.count(), 'by_role': roles},
+        'staff': {'users': sum(x['n'] for x in roles), 'admins': staff.filter(role='admin').count(), 'by_role': roles},
     })
+@secured
 def analytics_monthly_trend(request):
-    """Month-by-month billing, collections, consumption (last N months)."""
     months = int_param(request, 'months', 12, 1, 60)
-    rows = (Billings.objects.annotate(m=TruncMonth('billed_on')).order_by().values('m')
+    rows = (Billings.objects.filter(agency=request.agency, billed_on__isnull=False).annotate(m=TruncMonth('billed_on')).order_by().values('m')
             .annotate(billed=Sum('bill'), prev=Sum('b_cd'), paid=Sum('paid'), units=Sum('units_used'),
                       customers=Count('user_id', distinct=True), penalty=Sum('penalty'))
             .order_by('-m')[:months])
@@ -131,10 +133,10 @@ def analytics_monthly_trend(request):
                    month=x['m'].strftime('%Y-%m'), penalty=r2(x['penalty']))
             for x in reversed(list(rows))]
     return JsonResponse({'data': data})
+@secured
 def analytics_zone_performance(request):
-    """Latest-cycle performance per zone (Billings.user_id -> waterusers.zone)."""
-    zone_of = dict(read_users.objects.values_list('id', 'zone'))
-    qs, _ = latest_cycle()
+    zone_of = dict(read_users.objects.filter(agency=request.agency).values_list('id', 'zone'))
+    qs, _ = latest_cycle(request.agency)
     per_user = qs.order_by().values('user_id').annotate(
         billed=Sum('bill'), prev=Sum('b_cd'), paid=Sum('paid'), units=Sum('units_used'))
     acc = defaultdict(lambda: dict(billed=0, prev=0, paid=0, units=0, customers=0))
@@ -150,21 +152,21 @@ def analytics_zone_performance(request):
             for k, v in acc.items()]
     data.sort(key=lambda x: x['outstanding'], reverse=True)
     return JsonResponse({'data': data})
+@secured
 def analytics_group_breakdown(request):
-    """Latest-cycle performance per customer group (grp)."""
-    return JsonResponse({'data': sorted(group_cycle('grp'), key=lambda x: -x['due'])})
+    return JsonResponse({'data': sorted(group_cycle('grp', request.agency), key=lambda x: -x['due'])})
+@secured
 def analytics_status_breakdown(request):
-    """Latest-cycle count and value by billing status."""
-    qs, _ = latest_cycle()
+    qs, _ = latest_cycle(request.agency)
     rows = qs.order_by().values('status').annotate(count=Count('id'), billed=Sum('bill'), paid=Sum('paid'))
     return JsonResponse({'data': [{'status': x['status'] or 'Unknown', 'count': x['count'],
                                    'billed': r2(x['billed']), 'paid': r2(x['paid'])} for x in rows]})
+@secured
 def analytics_tariff_breakdown(request):
-    """Latest cycle by tariff rate: customers, units and revenue per rate."""
-    return JsonResponse({'data': sorted(group_cycle('rate'), key=lambda x: x['rate'] or 0)})
+    return JsonResponse({'data': sorted(group_cycle('rate', request.agency), key=lambda x: x['rate'] or 0)})
+@secured
 def analytics_consumption_bands(request):
-    """How many customers fall in each consumption band (latest cycle)."""
-    qs, d = latest_cycle()
+    qs, d = latest_cycle(request.agency)
     bands = [('0', 0, 0), ('1-5', 1, 5), ('6-10', 6, 10), ('11-20', 11, 20), ('21-40', 21, 40), ('40+', 41, 10**9)]
     counts = {b[0]: 0 for b in bands}
     for u in qs.values_list('units_used', flat=True):
@@ -175,27 +177,24 @@ def analytics_consumption_bands(request):
                 break
     return JsonResponse({'cycle': d.strftime('%B %Y') if d else None,
                          'data': [{'band': k, 'count': v} for k, v in counts.items()]})
+@secured
 def analytics_customer_growth(request):
-    """New connections per month and running total."""
     months = int_param(request, 'months', 12, 1, 60)
-    rows = (read_users.objects.annotate(m=TruncMonth('created_on')).order_by().values('m')
+    rows = (read_users.objects.filter(agency=request.agency).annotate(m=TruncMonth('created_on')).order_by().values('m')
             .annotate(n=Count('id')).order_by('m'))
     running, out = 0, []
     for x in rows:
-        if not x['m']:
-            running += x['n']
-            continue
         running += x['n']
-        out.append({'month': x['m'].strftime('%Y-%m'), 'new': x['n'], 'total': running})
+        if x['m']:
+            out.append({'month': x['m'].strftime('%Y-%m'), 'new': x['n'], 'total': running})
     return JsonResponse({'data': out[-months:]})
-
+@secured
 def analytics_top_debtors(request):
-    """Customers owing the most in the latest cycle + concentration of debt."""
     limit = int_param(request, 'limit', 10, 1, 100)
-    qs, _ = latest_cycle()
+    qs, _ = latest_cycle(request.agency)
     owing = qs.annotate(out=OUTSTANDING).filter(out__gt=0)
     total_out = r2(owing.aggregate(v=Sum('out'))['v'])
-    zone_of = dict(read_users.objects.values_list('id', 'zone'))
+    zone_of = dict(read_users.objects.filter(agency=request.agency).values_list('id', 'zone'))
     rows = list(owing.order_by('-out')[:limit])
     data = [{'user_id': b.user_id, 'name': b.name, 'phone': b.phone,
              'zone': zone_of.get(b.user_id, ''), 'bill': r2(b.bill), 'prev': r2(b.b_cd),
@@ -204,50 +203,47 @@ def analytics_top_debtors(request):
     return JsonResponse({'data': data, 'total_outstanding': total_out,
                          'debtor_count': owing.count(),
                          'top_share': pct(sum(x['outstanding'] for x in data), total_out)})
-
+@secured
 def analytics_top_consumers(request):
-    """Highest water users in the latest cycle and their share of total volume."""
     limit = int_param(request, 'limit', 10, 1, 100)
-    qs, _ = latest_cycle()
+    qs, _ = latest_cycle(request.agency)
     total_units = r2(qs.aggregate(v=Sum('units_used'))['v'])
-    zone_of = dict(read_users.objects.values_list('id', 'zone'))
+    zone_of = dict(read_users.objects.filter(agency=request.agency).values_list('id', 'zone'))
     rows = qs.order_by('-units_used')[:limit]
     data = [{'user_id': b.user_id, 'name': b.name, 'zone': zone_of.get(b.user_id, ''),
-             'units': b.units_used, 'bill': r2(b.bill),
+             'units': b.units_used or 0, 'bill': r2(b.bill),
              'share': pct(b.units_used, total_units)} for b in rows]
     return JsonResponse({'data': data, 'total_units': total_units,
                          'top_share': pct(sum(x['units'] for x in data), total_units)})
-
+@secured
 def analytics_reading_anomalies(request):
-    """Meter-reading quality: zero use, reverse readings, spikes, pending."""
-    avg = float(readings.objects.aggregate(a=Avg('units_used'))['a'] or 0)
+    mine = readings.objects.filter(agency=request.agency)
+    avg = float(mine.aggregate(a=Avg('units_used'))['a'] or 0)
     threshold = round(avg * 3, 1)
-    counts = readings.objects.aggregate(
+    counts = mine.aggregate(
         zero=Count('id', filter=Q(units_used=0)),
         negative=Count('id', filter=Q(cur_user__lt=F('prev_user'))),
         spike=Count('id', filter=Q(units_used__gt=threshold)) if threshold else Count('id', filter=Q(pk__isnull=True)),
         pending=Count('id', filter=Q(cur_user__isnull=True)),
         total=Count('id'))
-
     def pack(qs, reason):
-        return [{'name': r.name, 'metre_num': r.metre_num, 'zone': r.user.zone,
+        return [{'name': r.name, 'metre_num': r.metre_num, 'zone': r.user.zone if r.user else '',
                  'prev': r.prev_user, 'cur': r.cur_user, 'units': r.units_used, 'issue': reason}
                 for r in qs.select_related('user')]
-
-    items = (pack(readings.objects.filter(units_used__gt=threshold).order_by('-units_used')[:8], 'High consumption')
-             if threshold else [])
-    items += pack(readings.objects.filter(cur_user__lt=F('prev_user'))[:5], 'Reading lower than previous')
-    items += pack(readings.objects.filter(units_used=0)[:5], 'Zero consumption')
+    items = pack(mine.filter(units_used__gt=threshold).order_by('-units_used')[:8], 'High consumption') if threshold else []
+    items += pack(mine.filter(cur_user__lt=F('prev_user'))[:5], 'Reading lower than previous')
+    items += pack(mine.filter(units_used=0)[:5], 'Zero consumption')
     return JsonResponse({**counts, 'threshold': threshold, 'average_units': round(avg, 1), 'data': items})
-
 def serialize(row):
     return {"billing": row.billing.isoformat(), "due": row.due.isoformat(), "month": row.month}
 @csrf_exempt
 @require_http_methods(["GET", "PUT"])
+@secured
 def bill_dates_view(request):
-    row = BillDates.objects.order_by("id").first()
+    row = BillDates.objects.filter(agency=request.agency).order_by("id").first()
     if not row:
-        return JsonResponse({"error": "No row found in bill_dates. Create the first one manually."}, status=404)
+        today = date.today()
+        row = BillDates.objects.create(billing=today, due=today, month=today.strftime("%Y-%m"), agency=request.agency)
     if request.method == "PUT":
         try:
             data = json.loads(request.body)

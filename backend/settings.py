@@ -102,7 +102,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 #=================================================================
 
 import dj_database_url
-
+'''
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -122,15 +122,15 @@ DATABASES = {
 '''
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'kasarani',         
-        'USER': 'root',           
+        'USER': 'postgres',           
         'PASSWORD': '596424309',   
-        'HOST': 'localhost',          
-        'PORT': '3306',
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
 }
-'''
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
