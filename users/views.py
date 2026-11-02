@@ -165,6 +165,7 @@ def new_user(request):
             )
         return JsonResponse({"message": "User registered successfully"})
     except Exception as e:
+        print('Cant register customer: ', e)
         return JsonResponse({"error": str(e)}, status=500)
 @csrf_exempt
 @agency_required

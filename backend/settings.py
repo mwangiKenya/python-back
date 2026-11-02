@@ -188,8 +188,3 @@ ADVANTA_API_URL = env(
 ADVANTA_PARTNER_ID = env("ADVANTA_PARTNER_ID")
 ADVANTA_API_KEY = env("ADVANTA_API_KEY")
 ADVANTA_SHORTCODE = env("ADVANTA_SHORTCODE")
-
-# Africa's Talking (sandbox)
-AT_USERNAME = env("AT_USERNAME", default="sandbox")
-AT_API_KEY = env("AT_API_KEY", default="")
-AT_SENDER_ID = env("AT_SENDER_ID", default=None)
