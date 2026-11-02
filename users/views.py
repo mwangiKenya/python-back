@@ -135,6 +135,7 @@ def delete_user(request, user_id):
 def new_user(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request"}, status=400)
+    print(f'Agency of the user: {request.agency}')
     try:
         data = json.loads(request.body)
         fname = data.get("fname")
