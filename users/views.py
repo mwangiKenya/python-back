@@ -40,19 +40,22 @@ def register_user(request):
 @authentication_classes([])
 @permission_classes([])
 def users_login(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
-    if not username or not password:
-        return Response({"error": "Username and password are required"}, status=400)
-    user = Users.objects.filter(username=username).first()
-    if not user or not check_password(password, user.password):
-        return Response({"error": "Invalid credentials"}, status=401)
-    return Response({
-        "token": make_token(user),
-        "username": user.username,
-        "role": user.role,
-        "agency": user.agency
-    })
+    try:
+        username = request.data.get("username")
+        password = request.data.get("password")
+        if not username or not password:
+            return Response({"error": "Username and password are required"}, status=400)
+        user = Users.objects.filter(username=username).first()
+        if not user or not check_password(password, user.password):
+            return Response({"error": "Invalid credentials"}, status=401)
+        return Response({
+            "token": make_token(user),
+            "username": user.username,
+            "role": user.role,
+            "agency": user.agency
+        })
+    except Exception as e:
+        print('failed to login: ', e)
 @csrf_exempt
 @admin_required
 def update_employee(request, emp_id):
