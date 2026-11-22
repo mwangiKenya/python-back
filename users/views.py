@@ -202,6 +202,7 @@ def update_user(request, user_id):
             user.grp = data.get("grp") or user.grp
             user.parent = data.get("parent") or user.parent
             user.gen_name = data.get("gen_name") or user.gen_name
+            user.email = data.get("email") or user.email
             user.password = make_password(data.get("password")) or make_password(user.password)
             user.save()
             readings.objects.filter(user_id=user_id, agency=request.agency).update(
