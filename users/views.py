@@ -8,6 +8,7 @@ import json
 from django.views.decorators.csrf import csrf_exempt
 from datetime import date
 from django.db import transaction
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
@@ -36,6 +37,19 @@ def register_user(request):
         return Response({"message": "User registered successfully"}, status=201)
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+@csrf_exempt
+def water_user_login_view(request):
+    if request.method == "POST":
+        data = json.loads(request.body)
+        user = read_users.objects.filter(email=data.get("email")).first()
+        if user and check_password(data.get("password"), user.password):
+            return JsonResponse({
+                "message": "Success", "user_id":user.id
+            })
+        return JsonResponse({"error": "Invalid credentials"}, status=401)
+
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
@@ -188,6 +202,7 @@ def update_user(request, user_id):
             user.grp = data.get("grp") or user.grp
             user.parent = data.get("parent") or user.parent
             user.gen_name = data.get("gen_name") or user.gen_name
+            user.password = make_password(data.get("password")) or make_password(user.password)
             user.save()
             readings.objects.filter(user_id=user_id, agency=request.agency).update(
                 name=user.fname, phone=user.phone, metre_num=user.metre_num,
@@ -254,3 +269,29 @@ def water_users(request):
         'grp': u.grp, 'parent': u.parent, 'gen_name': u.gen_name
     } for u in read_users.objects.filter(agency=request.agency)]
     return JsonResponse(data, safe=False)
+
+def personal_data(request, user_id):
+    try:
+        data = read_users.objects.filter(id=user_id).values('fname','phone','email')
+        return JsonResponse(list(data),safe=False)
+    except Exception as e:
+        print('Failed to read user data: ', e)
+        return JsonResponse({'error':'Failed'},status=500)
+
+def readings_data(request, user_id):
+    try:
+        data = readings.objects.filter(user_id=user_id).values('' \
+        'prev_user','cur_user','prev_sup','cur_sup','units_used')
+        return JsonResponse(list(data),safe=False)
+    except Exception as e:
+        print('Failed to read readings data: ', e)
+        return JsonResponse({'error':'failed'})
+
+def read_bill_data(request, user_id):
+    try:
+        data = Billings.objects.filter(user_id=user_id).values('' \
+        'units_used','rate','bill','paid','bal','status','b_cd','penalty','billed_on')
+        return JsonResponse(list(data), safe=False)
+    except Exception as e:
+        print('Failed to fetch: ', e)
+        return JsonResponse({'error':'error'})

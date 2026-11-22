@@ -138,7 +138,6 @@ DATABASES = {
         "PORT": DB_PORT,
         "OPTIONS": _db_options,
         "CONN_MAX_AGE": 0,
-        # Required when going through Supabase's transaction pooler (port 6543)
         "DISABLE_SERVER_SIDE_CURSORS": DB_PORT == "6543",
     }
 }

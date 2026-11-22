@@ -21,4 +21,8 @@ urlpatterns = [
             name="update_all_bill_phones",
         ),
     path('water_users/', views.water_users, name='water_users'),
+    path("water_user_login/", views.water_user_login_view, name="login"),
+    path('read_personal_data/<user_id>/', views.personal_data,name='personal_data'),
+    path('read_readings_data/<user_id>/', views.readings_data,name='readings_data'),
+    path('read_bill_data/<user_id>/', views.read_bill_data,name='read_bill_data'),
 ]
