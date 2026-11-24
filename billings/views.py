@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
-from api.models import Billings, Payments, payDetails
+from api.models import Billings, Payments, payDetails, Phones
 from api.auth import agency_required
 import os
 from django.conf import settings
@@ -323,6 +323,24 @@ def send_sms_view(request):
         return JsonResponse({"error": "Cannot reach the SMS provider. Check the internet connection and try again."}, status=503)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+def sms_balance(request):
+    try:
+        res = requests.post(
+            "https://quicksms.advantasms.com/api/services/getbalance/",
+            json={
+                "apikey": settings.ADVANTA_API_KEY,
+                "partnerID": settings.ADVANTA_PARTNER_ID
+            },
+            timeout=15
+        )
+        data = res.json()
+        if data.get("response-code") == 200:
+            return JsonResponse({"success": True, "credit": data.get("credit")})
+        return JsonResponse({"success": False, "message": "Unable to retrieve balance"}, status=400)
+    except requests.RequestException:
+        return JsonResponse({"success": False, "message": "Advanta connection failed"}, status=502)
+    
 @agency_required
 def bill(request):
     data = [{
@@ -390,3 +408,57 @@ def payment_detail(request, pk):
 def active_pay_details(request):
     rows = payDetails.objects.filter(agency=request.agency, is_active=True).order_by("pk")
     return JsonResponse([payment_data(p) for p in rows], safe=False)
+
+import re
+from django.db import models
+IS_BOOL = isinstance(Phones._meta.get_field("is_active"), models.BooleanField)
+def flag(v):
+    return str(v).strip().lower() in ("true", "t", "1")
+def normalize_ke_phone(raw):
+    s = re.sub(r"[\s\-()+]", "", str(raw or ""))
+    if re.fullmatch(r"0[17]\d{8}", s):
+        s = "254" + s[1:]
+    elif re.fullmatch(r"[17]\d{8}", s):
+        s = "254" + s
+    return s if re.fullmatch(r"254[17]\d{8}", s) else None
+def phone_data(p):
+    return {"id": p.pk, "number": p.phone, "selected": flag(p.is_active)}
+def err(msg, status):
+    return JsonResponse({"error": msg}, status=status)
+@agency_required
+def list_phones(request):
+    out = {}
+    for p in Phones.objects.filter(agency=request.agency).order_by("pk"):
+        out.setdefault(p.user_id, []).append(phone_data(p))
+    return JsonResponse(out)
+@csrf_exempt
+@agency_required
+def sync_phones(request):
+    if request.method != "POST":
+        return err("Method not allowed.", 405)
+    try:
+        data = json.loads(request.body)
+    except (ValueError, TypeError):
+        return err("Invalid JSON.", 400)
+    user_id = data.get("user_id")
+    billing = Billings.objects.filter(user_id=user_id, agency=request.agency).first()
+    if not billing:
+        return err("Customer not found.", 404)
+    seen = {normalize_ke_phone(billing.phone)}
+    rows = []
+    for i in data.get("phones") or []:
+        number = normalize_ke_phone(i.get("number"))
+        if not number:
+            return err(f"Invalid phone number: {i.get('number')}", 400)
+        if number in seen:
+            return err(f"Duplicate phone number: {number}", 409)
+        seen.add(number)
+        rows.append((i.get("id"), number, flag(i.get("selected"))))
+    with transaction.atomic():
+        existing = {p.pk: p for p in Phones.objects.select_for_update().filter(agency=request.agency, user_id=user_id)}
+        Phones.objects.filter(pk__in=set(existing) - {r[0] for r in rows}).delete()
+        for pid, number, selected in rows:
+            p = existing.get(pid) or Phones(agency=request.agency, user_id=user_id)
+            p.phone, p.is_active = number, (selected if IS_BOOL else str(selected).lower())
+            p.save()
+    return JsonResponse({"phones": [phone_data(p) for p in Phones.objects.filter(agency=request.agency, user_id=user_id).order_by("pk")]})

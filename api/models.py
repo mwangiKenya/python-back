@@ -145,3 +145,24 @@ class payDetails(models.Model):
     class Meta:
         db_table = 'pay_details'
         managed = False
+
+class Agency(models.Model):
+    name = models.CharField(max_length=30)
+    email = models.CharField(max_length=100)
+    password = models.CharField(max_length=250)
+    status = models.CharField(max_length=20)
+    county = models.CharField(max_length=50)
+
+    class Meta:
+        db_table = 'agency'
+        managed = False
+
+class Phones(models.Model):
+    agency = models.IntegerField()
+    user_id = models.IntegerField()
+    phone = models.CharField(max_length=20)
+    is_active = models.BooleanField()
+
+    class Meta:
+        db_table = 'phones'
+        managed = False

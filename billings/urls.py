@@ -14,4 +14,7 @@ urlpatterns = [
     path("pay-details/", views.payment_list, name="payment_list"),
     path("pay-details/<int:pk>/", views.payment_detail, name="payment_detail"),
     path('pay-details/active/', views.active_pay_details),
+    path("phones/", views.list_phones),
+    path("phones/sync/", views.sync_phones),
+    path('sms_balance/', views.sms_balance),
 ]
